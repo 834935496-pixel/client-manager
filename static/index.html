@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>客户档案</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a3a6b">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-title" content="客户档案">
+<link rel="stylesheet" href="style.css?v=12">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── 登录页 ── -->
+  <div id="login-page" style="display:none;padding:40px 24px;">
+    <div style="text-align:center;margin-bottom:40px;">
+      <div style="font-size:48px;">🏦</div>
+      <h1 style="font-size:22px;font-weight:700;color:var(--primary);margin-top:12px;">客户档案系统</h1>
+      <p style="color:var(--text-muted);margin-top:6px;">银行对公客户管理</p>
+    </div>
+    <div class="form-group">
+      <label class="form-label">访问密码</label>
+      <input id="login-pwd" type="password" class="form-input" placeholder="请输入访问密码"
+        onkeydown="if(event.key==='Enter') doLogin()">
+    </div>
+    <button class="btn btn-primary" onclick="doLogin()">进入系统</button>
+    <p id="login-err" style="color:var(--danger);text-align:center;margin-top:12px;"></p>
+  </div>
+
+  <!-- ── 今日页 ── -->
+  <div id="page-today" class="page">
+    <div class="header">
+      <div>
+        <div class="subtitle" id="today-date"></div>
+        <h1>今日工作台</h1>
+      </div>
+      <button class="icon-btn" onclick="showPushModal()" title="推送提醒">🔔</button>
+      <button class="icon-btn" onclick="showCalendarModal()" title="订阅日历">📅</button>
+    </div>
+    <div class="section-title">今日及逾期待办</div>
+    <div class="card">
+      <div class="card-body" id="today-todos"><div class="loading"><div class="spinner"></div></div></div>
+    </div>
+  </div>
+
+  <!-- ── 企业列表页 ── -->
+  <div id="page-companies" class="page" style="padding:0 0 calc(var(--nav-h) + 16px);">
+    <div class="header">
+      <div><h1>客户档案</h1></div>
+      <div class="header-actions">
+        <button class="icon-btn" onclick="triggerPdfUpload()" title="PDF导入">📄</button>
+        <button class="icon-btn" onclick="showModal('add-company-modal')">＋</button>
+      </div>
+    </div>
+    <div class="search-box">
+      <input type="search" class="search-input" id="company-search" placeholder="搜索企业名称..." oninput="searchCompanies(this.value)">
+    </div>
+    <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="handlePdfUpload(this)">
+    <div id="companies-list"></div>
+  </div>
+
+  <!-- ── 企业详情页 ── -->
+  <div id="page-detail" class="page">
+    <div class="header">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button class="icon-btn" onclick="navTo('companies')">←</button>
+        <div>
+          <h1 id="detail-name">企业详情</h1>
+          <div class="subtitle" id="detail-industry"></div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="icon-btn" onclick="editCurrentCompany()">✏️</button>
+        <button class="icon-btn" onclick="deleteCurrentCompany()">🗑</button>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('info')">基本信息</button>
+      <button class="tab" onclick="switchTab('products')">合作产品</button>
+      <button class="tab" onclick="switchTab('interactions')">合作动态</button>
+      <button class="tab" onclick="switchTab('todos')">待办</button>
+      <button class="tab" onclick="switchTab('docs')">文档</button>
+      <button class="tab" onclick="switchTab('finance')">财务状况</button>
+    </div>
+
+    <!-- 基本信息（含联系人） -->
+    <div id="tab-info">
+      <div class="card"><div class="card-body" id="company-info-grid"></div></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 8px;">
+        <div style="font-size:13px;font-weight:600;color:var(--text);">联系人</div>
+        <button class="btn btn-outline btn-sm" onclick="showAddContact()">＋ 添加</button>
+      </div>
+      <div id="contacts-list"></div>
+    </div>
+
+    <!-- 合作产品 -->
+    <div id="tab-products" style="display:none;">
+      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="showAddProduct()">＋ 新增合作产品</button>
+      <div id="products-list"></div>
+    </div>
+
+    <!-- 文档 -->
+    <div id="tab-docs" style="display:none;">
+      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="openUploadDocModal()">＋ 上传文档</button>
+      <div id="doc-filter-bar" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:2px;"></div>
+      <div id="docs-list"></div>
+    </div>
+
+    <!-- 合作动态 -->
+    <div id="tab-interactions" style="display:none;">
+      <button class="btn btn-outline btn-sm" style="margin-bottom:12px;width:100%;"
+        onclick="showModal('add-interaction-modal')">＋ 添加记录</button>
+      <div class="card"><div class="card-body" id="interactions-list"></div></div>
+    </div>
+
+    <!-- 待办 -->
+    <div id="tab-todos" style="display:none;">
+      <button class="btn btn-outline btn-sm" style="margin-bottom:12px;width:100%;"
+        onclick="showAddTodo(true)">＋ 添加待办</button>
+      <div class="card"><div class="card-body" id="company-todos-list"></div></div>
+    </div>
+
+    <!-- 财务状况 -->
+    <div id="tab-finance" style="display:none;">
+      <div class="fin-toolbar">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button class="fin-year-btn" onclick="finPrevYear()">‹</button>
+          <span id="fin-year-label" style="font-weight:600;font-size:15px;min-width:50px;text-align:center;">—</span>
+          <button class="fin-year-btn" onclick="finNextYear()">›</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn btn-outline btn-sm" onclick="addFinYear()">＋年份</button>
+          <button class="btn btn-primary btn-sm" onclick="extractFinancials()" id="fin-extract-btn">🤖 AI提取</button>
+          <button class="btn btn-outline btn-sm" onclick="saveFinYear()" id="fin-save-btn" style="display:none;">💾 保存</button>
+          <button class="btn btn-outline btn-sm" onclick="deleteFinancials()" id="fin-delete-btn" style="display:none;">删除</button>
+        </div>
+      </div>
+      <div id="fin-legend" style="display:none;margin-bottom:6px;font-size:12px;gap:12px;flex-wrap:wrap;">
+        <span><span class="fin-badge fin-badge-ratio"></span> 占总资产&gt;10%</span>
+        <span style="color:var(--text-muted);">点击金额可编辑，计算行自动汇总</span>
+      </div>
+      <div id="fin-content"></div>
+    </div>
+
+  </div>
+
+  <!-- ── AI 对话页 ── -->
+  <div id="page-ai" class="page" style="padding:0;flex-direction:column;overflow:hidden;">
+    <div class="header" style="flex-shrink:0;">
+      <h1>AI 助理</h1>
+      <select class="mode-select" id="ai-mode" style="color:#fff;background:rgba(255,255,255,.15);border:none;border-radius:8px;">
+        <option value="fast">⚡ 快速</option>
+        <option value="deep">🧠 深度</option>
+        <option value="cloud">☁️ 云端</option>
+        <option value="web">🌐 联网</option>
+      </select>
+    </div>
+    <!-- 模式切换 -->
+    <div style="display:flex;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <button id="ai-tab-single" onclick="setAiTab('single')"
+        style="flex:1;padding:10px 0;font-size:13px;font-weight:600;border:none;border-bottom:2px solid var(--primary);color:var(--primary);background:#fff;cursor:pointer;">🏢 客户分析</button>
+      <button id="ai-tab-search" onclick="setAiTab('search')"
+        style="flex:1;padding:10px 0;font-size:13px;font-weight:normal;border:none;border-bottom:2px solid transparent;color:var(--text-muted);background:#fff;cursor:pointer;">🔍 全库检索</button>
+    </div>
+    <!-- 客户选择栏（客户分析模式） -->
+    <div id="ai-company-bar" style="background:#f0f4ff;border-bottom:1px solid var(--border);padding:10px 16px;display:flex;align-items:center;gap:8px;flex-shrink:0;">
+      <span style="font-size:13px;color:var(--text-muted);flex-shrink:0;">关联客户：</span>
+      <select id="ai-company-select" onchange="onAiCompanyChange()"
+        style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:#fff;max-width:260px;">
+        <option value="">不关联（通用对话）</option>
+      </select>
+      <button id="ai-clear-btn" onclick="clearAiCompany()"
+        style="display:none;font-size:12px;color:var(--text-muted);background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;cursor:pointer;">清除</button>
+    </div>
+    <!-- 快速检索提示（全库检索模式） -->
+    <div id="ai-search-bar" style="display:none;padding:10px 16px;border-bottom:1px solid var(--border);background:#f8f9fa;flex-shrink:0;">
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">快速提问：</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button onclick="quickSearch('哪些客户是A级或B级客户？请列出名单和基本情况')" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--text);">A/B级客户</button>
+        <button onclick="quickSearch('有哪些待跟进的待办事项？按紧急程度整理')" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--text);">待跟进客户</button>
+        <button onclick="quickSearch('最近一个月内有过互动记录的客户有哪些？')" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--text);">近期互动</button>
+        <button onclick="quickSearch('授信额度最高的几家企业是哪些？请排名')" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--text);">授信排名</button>
+        <button onclick="quickSearch('按行业分类汇总所有客户，每个行业有几家？')" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--text);">行业分布</button>
+        <button onclick="quickSearch('哪些客户长时间没有互动记录，可能需要重新联系？')" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--text);">久未联系</button>
+      </div>
+    </div>
+    <div class="chat-messages" id="chat-messages" style="padding:12px 16px 130px;flex:1;overflow-y:auto;"></div>
+  </div>
+
+  <!-- ── AI 悬浮输入框 ── -->
+  <div id="ai-chat-input-bar" style="display:none;position:fixed;bottom:var(--nav-h);left:0;right:0;z-index:40;background:#fff;border-top:1px solid var(--border);padding:12px 14px;box-shadow:0 -2px 10px rgba(0,0,0,.08);">
+    <div style="display:flex;gap:10px;align-items:flex-end;">
+      <textarea class="chat-input" id="chat-input" placeholder="问任何客户相关的问题..." rows="2"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
+        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,140)+'px'"></textarea>
+      <button class="btn btn-primary" onclick="sendChat()" style="width:auto;flex-shrink:0;align-self:flex-end;padding:12px 18px;font-size:14px;">发送</button>
+    </div>
+  </div>
+
+  <!-- ── 底部导航 ── -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-page="today" onclick="navTo('today')">
+      <span class="nav-icon">📋</span>今日
+    </button>
+    <button class="nav-item" data-page="companies" onclick="navTo('companies')">
+      <span class="nav-icon">🏢</span>客户
+    </button>
+    <button class="nav-item" data-page="ai" onclick="navTo('ai')">
+      <span class="nav-icon">🤖</span>AI助理
+    </button>
+  </nav>
+
+  <!-- ── 企业操作菜单 ── -->
+  <div class="modal-overlay" id="company-action-modal">
+    <div class="modal" style="padding-bottom:24px;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="company-action-name"></div>
+      <div id="company-action-industry" style="font-size:13px;color:var(--text-muted);margin-top:-10px;margin-bottom:16px;"></div>
+      <button class="btn btn-outline" style="width:100%;margin-bottom:8px;" onclick="actionView()">查看详情</button>
+      <button class="btn btn-outline" style="width:100%;margin-bottom:8px;" onclick="actionEdit()">编辑信息</button>
+      <button class="btn btn-danger" style="width:100%;" onclick="actionDelete()">删除企业</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('company-action-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 通用确认 Modal ── -->
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal" style="padding-bottom:24px;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="confirm-title">确认删除</div>
+      <p id="confirm-message" style="font-size:14px;color:var(--text-muted);margin-bottom:20px;"></p>
+      <button class="btn btn-danger" onclick="confirmOk()">确认删除</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('confirm-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 新建/编辑企业 Modal ── -->
+  <div class="modal-overlay" id="add-company-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="company-modal-title">新建企业</div>
+      <input type="hidden" id="edit-company-id">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;padding:6px 10px;background:#f8f9fa;border-radius:8px;">— 基本信息 —</div>
+      <div class="form-group">
+        <label class="form-label">企业名称 *</label>
+        <input class="form-input" id="fc-name" placeholder="企业全称">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">行业</label>
+          <input class="form-input" id="fc-industry" placeholder="如：制造业">
+        </div>
+        <div class="form-group">
+          <label class="form-label">客户等级</label>
+          <select class="form-select" id="fc-level">
+            <option value="A">A 级（重点）</option>
+            <option value="B" selected>B 级（维护）</option>
+            <option value="C">C 级（普通）</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">授信额度（万元）</label>
+        <input class="form-input" id="fc-credit" type="number" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <textarea class="form-textarea" id="fc-notes" placeholder="重要信息、业务背景..."></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">企业规模</label>
+          <select class="form-select" id="fc-company-scale">
+            <option value="">未填写</option>
+            <option value="微型企业">微型企业</option>
+            <option value="小型企业">小型企业</option>
+            <option value="中型企业">中型企业</option>
+            <option value="大型企业">大型企业</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">员工人数</label>
+          <input class="form-input" id="fc-employee-count" placeholder="如：200人">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">办公地址</label>
+        <input class="form-input" id="fc-office-address" placeholder="实际办公地址">
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin:14px 0 10px;padding:6px 10px;background:#f8f9fa;border-radius:8px;">— 工商注册信息 —</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">法定代表人</label>
+          <input class="form-input" id="fc-legal-rep" placeholder="姓名">
+        </div>
+        <div class="form-group">
+          <label class="form-label">法人身份证号</label>
+          <input class="form-input" id="fc-legal-rep-id" placeholder="18位证件号">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">统一社会信用代码</label>
+        <input class="form-input" id="fc-credit-code" placeholder="18位字母数字">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">注册资本</label>
+          <input class="form-input" id="fc-reg-capital" placeholder="如：5000万元">
+        </div>
+        <div class="form-group">
+          <label class="form-label">成立日期</label>
+          <input class="form-input" id="fc-established-date" type="date">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">注册地址</label>
+        <input class="form-input" id="fc-reg-address" placeholder="企业注册地址">
+      </div>
+      <div class="form-group">
+        <label class="form-label">主营业务</label>
+        <textarea class="form-textarea" id="fc-biz-scope" placeholder="主营业务简述..." rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">经营范围</label>
+        <textarea class="form-textarea" id="fc-operating-scope" placeholder="工商登记经营范围（可粘贴完整内容）..." rows="3"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="saveCompany()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('add-company-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 新建/编辑联系人 Modal ── -->
+  <div class="modal-overlay" id="add-contact-modal">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="contact-modal-title">添加联系人</div>
+      <input type="hidden" id="edit-contact-id">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">姓名 *</label>
+          <input class="form-input" id="ft-name" placeholder="联系人姓名">
+        </div>
+        <div class="form-group">
+          <label class="form-label">职位</label>
+          <input class="form-input" id="ft-position" placeholder="如：财务总监">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">手机号</label>
+          <input class="form-input" id="ft-phone" type="tel" placeholder="138...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">微信号</label>
+          <input class="form-input" id="ft-wechat" placeholder="微信号">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <input class="form-input" id="ft-notes" placeholder="性格、偏好等">
+      </div>
+      <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="ft-primary" style="width:18px;height:18px;">
+        <label for="ft-primary" style="font-size:14px;">设为主要联系人</label>
+      </div>
+      <button class="btn btn-primary" onclick="saveContact()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('add-contact-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 联系人操作菜单 ── -->
+  <div class="modal-overlay" id="contact-action-modal">
+    <div class="modal" style="padding-bottom:24px;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="contact-action-name"></div>
+      <div id="contact-action-pos" style="font-size:13px;color:var(--text-muted);margin-top:-10px;margin-bottom:16px;"></div>
+      <button class="btn btn-outline" style="width:100%;margin-bottom:8px;" onclick="contactActionEdit()">编辑信息</button>
+      <button class="btn btn-danger" style="width:100%;" onclick="contactActionDelete()">删除联系人</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('contact-action-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 添加互动 Modal ── -->
+  <div class="modal-overlay" id="add-interaction-modal">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">添加互动记录</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">日期 *</label>
+          <input class="form-input" id="i-date" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">类型</label>
+          <select class="form-select" id="i-type">
+            <option>拜访</option><option>电话</option><option>微信</option>
+            <option>会议</option><option>放款</option><option>还款</option>
+            <option>开户</option><option>其他</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">联系人</label>
+        <select class="form-select" id="i-contact">
+          <option value="">不指定</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">内容 *</label>
+        <textarea class="form-textarea" id="i-content" placeholder="记录此次互动详情..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">下一步行动</label>
+        <input class="form-input" id="i-next" placeholder="下次跟进的具体动作">
+      </div>
+      <button class="btn btn-primary" onclick="saveInteraction()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('add-interaction-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 添加待办 Modal ── -->
+  <div class="modal-overlay" id="add-todo-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="todo-modal-title">添加待办</div>
+      <input type="hidden" id="todo-company-id">
+      <input type="hidden" id="edit-todo-id">
+      <div class="form-group">
+        <label class="form-label">主题 *</label>
+        <input class="form-input" id="t-content" placeholder="待办事项主题">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">开始日期 *</label>
+          <input class="form-input" id="t-date" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">结束日期</label>
+          <input class="form-input" id="t-end-date" type="date">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">优先级</label>
+        <select class="form-select" id="t-priority">
+          <option value="high">🔴 高</option>
+          <option value="medium" selected>🟡 中</option>
+          <option value="low">🟢 低</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <label class="form-label" style="margin:0;">子项</label>
+          <button type="button" onclick="addSubItemInput()" style="background:none;border:none;color:var(--primary);font-size:13px;cursor:pointer;">＋ 添加子项</button>
+        </div>
+        <div id="sub-items-editor"></div>
+      </div>
+      <button class="btn btn-primary" onclick="saveTodo()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('add-todo-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── PDF 预览 Modal ── -->
+  <div class="modal-overlay" id="pdf-preview-modal">
+    <div class="modal" style="max-height:85vh;">
+      <div class="modal-handle"></div>
+      <div class="modal-title">PDF 导入预览</div>
+      <p id="pdf-preview-summary" style="font-size:13px;color:var(--text-muted);margin-bottom:12px;"></p>
+      <div id="pdf-preview-list" style="max-height:50vh;overflow-y:auto;margin-bottom:16px;"></div>
+      <button class="btn btn-primary" id="pdf-confirm-btn" onclick="confirmPdfImport()">确认导入</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('pdf-preview-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 合作产品 新增/编辑 Modal ── -->
+  <div class="modal-overlay" id="product-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="product-modal-title">新增合作产品</div>
+      <input type="hidden" id="edit-product-id">
+      <div class="form-group">
+        <label class="form-label">业务类别</label>
+        <select class="form-select" id="fp-category" onchange="onProductCategoryChange()">
+          <option value="资产类">资产类</option>
+          <option value="负债类">负债类</option>
+          <option value="中间业务">中间业务</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">产品名称 *</label>
+        <input class="form-input" id="fp-name" placeholder="如：流动资金贷款">
+      </div>
+      <!-- 资产类专属字段 -->
+      <div id="fp-asset-section">
+        <div class="form-group">
+          <label class="form-label">授信类型</label>
+          <select class="form-select" id="fp-credit-type">
+            <option value="">不指定</option>
+            <option value="组合额度">组合额度</option>
+            <option value="专项额度">专项额度</option>
+            <option value="特别授信额度">特别授信额度</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">授信额度（万元）</label>
+            <input class="form-input" id="fp-amount" type="number" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">放款金额（万元）</label>
+            <input class="form-input" id="fp-loan-amount" type="number" placeholder="0">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">利率</label>
+          <input class="form-input" id="fp-notes" placeholder="如：3.65%">
+        </div>
+      </div>
+      <!-- 负债类/中间业务字段 -->
+      <div id="fp-other-section" style="display:none;">
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">金额（万元）</label>
+            <input class="form-input" id="fp-amount-other" type="number" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label class="form-label">费率/备注</label>
+            <input class="form-input" id="fp-notes-other" placeholder="如：0.5%">
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">起始日期</label>
+          <input class="form-input" id="fp-start" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">到期日期</label>
+          <input class="form-input" id="fp-end" type="date">
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="saveProduct()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('product-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 粘贴内容提取 Modal ── -->
+  <div class="modal-overlay" id="paste-extract-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title">粘贴内容提取</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">将 Kimi、天眼查等任意来源的企业信息粘贴到下方，AI 将自动识别并提取字段。</p>
+      <textarea id="paste-extract-text" style="width:100%;min-height:160px;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:14px;resize:vertical;" placeholder="在此粘贴企业信息文本…"></textarea>
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="extractFromPaste(this)">提取字段</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('paste-extract-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── AI 自动填充确认 Modal ── -->
+  <div class="modal-overlay" id="autofill-modal">
+    <div class="modal" style="max-height:80vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title">AI 自动填充预览</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">以下是联网查询到的工商信息，确认后将更新对应字段（已有值也会覆盖）：</p>
+      <div id="autofill-preview"></div>
+      <button class="btn btn-primary" style="margin-top:12px;" onclick="confirmAutofill()">确认应用</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('autofill-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── Upload Doc Modal ── -->
+  <div class="modal-overlay" id="upload-doc-modal">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">上传文档</div>
+      <div style="margin-bottom:16px;">
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">选择文档分类</div>
+        <div id="doc-category-btns" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+      </div>
+      <input type="file" id="doc-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" style="display:none" onchange="handleDocUpload(this)">
+      <button class="btn btn-primary" id="doc-upload-btn" style="width:100%;" onclick="document.getElementById('doc-file-input').click()">选择文件并上传</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('upload-doc-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 推送提醒 Modal ── -->
+  <div class="modal-overlay" id="push-modal">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-title">🔔 每日推送提醒</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.7;">开启后每天早上 8 点自动推送当日待办到手机，即使 App 未打开也能收到。</p>
+      <div id="push-status" style="text-align:center;padding:12px;background:#f8f9fa;border-radius:8px;margin-bottom:16px;font-size:14px;"></div>
+      <button id="push-toggle-btn" class="btn btn-primary" onclick="togglePush()">开启推送</button>
+      <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="testPushNow()">📨 立即测试推送</button>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-size:12px;color:var(--text-muted);line-height:1.8;">
+        <strong style="color:var(--text);">iPhone 使用说明</strong><br>
+        需先将本页添加到主屏幕（Safari → 分享 → 添加到主屏幕），再从主屏幕打开后开启通知。iOS 16.4+ 支持。
+      </div>
+      <button class="btn btn-outline" style="width:100%;margin-top:12px;" onclick="hideModal('push-modal')">关闭</button>
+    </div>
+  </div>
+
+  <!-- ── 日历订阅 Modal ── -->
+  <div class="modal-overlay" id="calendar-modal">
+    <div class="modal" style="max-height:85vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title">📅 订阅待办日历</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;line-height:1.6;">将以下链接添加到手机日历，系统会自动同步所有未完成待办事项。</p>
+      <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:16px;">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">订阅链接</div>
+        <div id="cal-url" style="font-size:12px;word-break:break-all;color:var(--primary);line-height:1.6;"></div>
+      </div>
+      <button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="copyCalUrl()">复制链接</button>
+      <div style="border-top:1px solid var(--border);padding-top:14px;">
+        <div style="font-size:13px;font-weight:600;margin-bottom:10px;">添加到 iPhone 日历</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
+          ① 复制上方链接<br>
+          ② 打开「设置」→「日历」→「账户」<br>
+          ③「添加账户」→「其他」→「添加已订阅的日历」<br>
+          ④ 粘贴链接 → 下一步 → 存储<br>
+          <span style="color:var(--accent);">⚠️ 手机和电脑需在同一 WiFi 下</span>
+        </div>
+        <div style="font-size:13px;font-weight:600;margin:14px 0 10px;">添加到 Google 日历</div>
+        <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
+          ① 打开 Google 日历网页版<br>
+          ② 左栏「其他日历」→「＋」→「通过网址添加」<br>
+          ③ 粘贴订阅链接 → 添加日历
+        </div>
+      </div>
+      <button class="btn btn-outline" style="width:100%;margin-top:16px;" onclick="hideModal('calendar-modal')">关闭</button>
+    </div>
+  </div>
+
+  <!-- ── 待办附件 Modal ── -->
+  <div class="modal-overlay" id="todo-docs-modal">
+    <div class="modal" style="max-height:85vh;">
+      <div class="modal-handle"></div>
+      <div class="modal-title">待办附件</div>
+      <div id="todo-docs-subtitle" style="font-size:13px;color:var(--text-muted);margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+      <input type="hidden" id="todo-docs-todo-id">
+      <input type="file" id="todo-doc-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md,.jpg,.jpeg,.png" style="display:none" onchange="handleTodoDocUpload(this)">
+      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="document.getElementById('todo-doc-file-input').click()">＋ 上传附件</button>
+      <div id="todo-docs-list"></div>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('todo-docs-modal')">关闭</button>
+    </div>
+  </div>
+
+  <!-- ── FAB ── -->
+  <button class="fab" id="fab" onclick="showQuickAdd()">＋</button>
+
+</div>
+<script src="app.js?v=39"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  }
+</script>
+</body>
+</html>
