@@ -208,3 +208,48 @@ body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; 
 .fin-calc { color:var(--text); }
 .fin-ph { color:var(--text-muted); font-size:12px; }
 .fin-flag-change { font-weight:700; }
+
+/* 文档索引状态徽章 */
+.doc-index-badge {
+  display:inline-flex; align-items:center; gap:4px;
+  font-size:11px; padding:2px 7px; border-radius:10px;
+  margin-left:6px; vertical-align:middle;
+}
+.doc-index-badge.indexing {
+  background:#fef3c7; color:#92400e;
+}
+.doc-index-badge.indexed {
+  background:#d1fae5; color:#065f46;
+}
+.doc-index-spin {
+  display:inline-block; width:9px; height:9px;
+  border:2px solid #f59e0b; border-top-color:transparent;
+  border-radius:50%; animation:spin 0.8s linear infinite;
+}
+
+/* 财务校验 */
+.fin-cell-warn { background:#fff7ed !important; border-left:3px solid #f59e0b !important; }
+.fin-cell-ai   { background:#eff6ff; }
+.fin-cell-manual { background:#f0fdf4; }
+.fin-warn-badge { font-size:10px; color:#f59e0b; margin-left:3px; cursor:help; }
+.fin-validation-banner {
+  margin:6px 0 8px; padding:8px 12px; border-radius:6px;
+  background:#fff7ed; border:1px solid #fcd34d;
+  font-size:12px; color:#92400e; line-height:1.5;
+}
+.fin-ok-banner {
+  margin:6px 0 8px; padding:6px 12px; border-radius:6px;
+  background:#f0fdf4; border:1px solid #86efac;
+  font-size:12px; color:#166534;
+}
+
+/* 上传按钮内联转圈 */
+.upload-spin {
+  display:inline-block; width:13px; height:13px;
+  border:2px solid rgba(255,255,255,0.35); border-top-color:#fff;
+  border-radius:50%; animation:spin .7s linear infinite;
+  vertical-align:middle; margin-right:5px;
+}
+.btn-outline .upload-spin, .btn-sm.btn-outline .upload-spin {
+  border-color:rgba(0,0,0,0.15); border-top-color:var(--primary);
+}

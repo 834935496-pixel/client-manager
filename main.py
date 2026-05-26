@@ -4,7 +4,7 @@ from datetime import date
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import uuid
 import shutil
@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "39"
+APP_VERSION = "40"
 
 @app.get("/api/version")
 async def get_version():
@@ -601,8 +601,16 @@ def ai_chat(body: AIChatBody):
         conn.close()
 
         context = build_company_context(company, contacts, interactions, todos)
-        messages.insert(0, {"role": "user", "content": f"以下是该企业的档案信息：\n\n{context}"})
+        fin_ctx = _build_fin_context(body.company_id)
+        full_ctx = context + ("\n\n" + fin_ctx if fin_ctx else "")
+        messages.insert(0, {"role": "user", "content": f"以下是该企业的档案信息：\n\n{full_ctx}"})
         messages.insert(1, {"role": "assistant", "content": "好的，我已了解该企业的档案信息，请问您有什么需要分析或处理的？"})
+
+        doc_chunks = _search_doc_chunks(body.company_id, body.message)
+        if doc_chunks:
+            doc_ctx = "\n\n".join(doc_chunks)
+            messages.insert(2, {"role": "user", "content": f"以下是与当前问题相关的文档摘录：\n\n{doc_ctx}"})
+            messages.insert(3, {"role": "assistant", "content": "好的，我已参考相关文档内容。"})
 
     messages.append({"role": "user", "content": body.message})
 
@@ -936,7 +944,10 @@ MIME_TYPES = {
 def list_documents(company_id: int):
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM documents WHERE company_id=? ORDER BY uploaded_at DESC",
+        """SELECT id, company_id, filename, original_name, size, category,
+                  description, uploaded_at, doc_indexed,
+                  CASE WHEN doc_text != '' THEN 1 ELSE 0 END as doc_text
+           FROM documents WHERE company_id=? ORDER BY uploaded_at DESC""",
         (company_id,),
     ).fetchall()
     conn.close()
@@ -946,6 +957,7 @@ def list_documents(company_id: int):
 @app.post("/api/companies/{company_id}/documents")
 async def upload_document(
     company_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     category: str = Form("其他"),
 ):
@@ -958,12 +970,14 @@ async def upload_document(
     dest.write_bytes(content)
     conn = get_db()
     cur = conn.execute(
-        "INSERT INTO documents (company_id, filename, original_name, size, category) VALUES (?,?,?,?,?)",
+        "INSERT INTO documents (company_id, filename, original_name, size, category, doc_indexed) VALUES (?,?,?,?,?,0)",
         (company_id, saved_name, file.filename, len(content), category),
     )
     conn.commit()
-    row = conn.execute("SELECT * FROM documents WHERE id=?", (cur.lastrowid,)).fetchone()
+    doc_id = cur.lastrowid
+    row = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
     conn.close()
+    background_tasks.add_task(_index_document, doc_id, dest, file.filename)
     return dict(row)
 
 
@@ -991,6 +1005,7 @@ def delete_document(doc_id: int):
         if path.exists():
             path.unlink()
         conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
+        conn.execute("DELETE FROM documents_fts WHERE rowid=?", (doc_id,))
         conn.commit()
     conn.close()
     return {"ok": True}
@@ -1159,7 +1174,10 @@ JSON格式：
 def _to_wan(value, unit: str):
     if value is None:
         return None
-    v = float(value)
+    try:
+        v = float(str(value).replace(",", "").replace("，", "").strip())
+    except (ValueError, TypeError):
+        return None
     if unit == "元":
         v = v / 10000
     elif unit == "亿元":
@@ -1668,6 +1686,183 @@ def _extract_excel(file_path: Path) -> dict:
     return result
 
 
+def _extract_text_from_pdf(path: Path) -> str:
+    """从可复制文字的 PDF 直接提取文本。"""
+    import fitz
+    doc = fitz.open(str(path))
+    parts = []
+    for i, page in enumerate(doc):
+        t = page.get_text().strip()
+        if t:
+            parts.append(f"--- 第{i+1}页 ---\n{t}")
+    doc.close()
+    return "\n\n".join(parts)
+
+
+def _extract_text_from_excel(path: Path) -> str:
+    """把 Excel 各 sheet 的单元格内容转成可检索文本。"""
+    suffix = path.suffix.lower()
+    sheets = _read_xlsx_sheets(path) if suffix in (".xlsx", ".xlsm") else _read_xls_sheets(path)
+    parts = []
+    for sheet_name, rows in sheets.items():
+        parts.append(f"[{sheet_name}]")
+        for row in rows:
+            cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
+            if cells:
+                parts.append("  ".join(cells))
+    return "\n".join(parts)
+
+
+async def _extract_text_hybrid_pdf(path: Path, max_pages: int = 60) -> str:
+    """逐页提取：文字页用 PyMuPDF，扫描页用 Kimi OCR，合并返回。"""
+    import fitz, base64 as _b64
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "")
+    has_ocr = bool(api_key and "moonshot" in base_url)
+
+    if has_ocr:
+        from openai import OpenAI
+        ocr_client = OpenAI(api_key=api_key, base_url=base_url)
+
+    pdf = fitz.open(str(path))
+    page_texts = []
+    ocr_needed = []  # [(page_index, pixmap_b64)]
+
+    for i in range(min(len(pdf), max_pages)):
+        t = pdf[i].get_text().strip()
+        if len(t) >= 50:
+            page_texts.append((i, t))
+        else:
+            if has_ocr:
+                pix = pdf[i].get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+                b64 = _b64.b64encode(pix.tobytes("jpeg", jpg_quality=70)).decode()
+                ocr_needed.append((i, b64))
+            # 无 OCR 配置时跳过扫描页
+
+    # OCR 扫描页
+    for i, b64 in ocr_needed:
+        try:
+            resp = ocr_client.chat.completions.create(
+                model="moonshot-v1-8k-vision-preview",
+                messages=[{"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                    {"type": "text", "text": "请将这页文档的全部文字内容原文输出，保持段落结构，不添加任何解释。"},
+                ]}],
+                max_tokens=2000,
+            )
+            t = (resp.choices[0].message.content or "").strip()
+            if t:
+                page_texts.append((i, t))
+        except Exception as e:
+            print(f"OCR page {i+1} error: {e}")
+
+    pdf.close()
+    page_texts.sort(key=lambda x: x[0])
+    return "\n\n".join(f"--- 第{i+1}页 ---\n{t}" for i, t in page_texts)
+
+
+async def _index_document(doc_id: int, file_path: Path, original_name: str):
+    """上传后台任务：提取文本并写入 FTS 索引。"""
+    suffix = file_path.suffix.lower()
+    text = ""
+    try:
+        if suffix in (".xlsx", ".xls", ".xlsm"):
+            text = _extract_text_from_excel(file_path)
+        elif suffix == ".pdf":
+            text = await _extract_text_hybrid_pdf(file_path)
+        elif suffix in (".txt", ".csv", ".md"):
+            text = file_path.read_text(errors="ignore")
+    except Exception as e:
+        print(f"Index doc {doc_id} error: {e}")
+
+    conn = get_db()
+    conn.execute(
+        "UPDATE documents SET doc_text=?, doc_indexed=1 WHERE id=?",
+        (text[:500_000], doc_id),
+    )
+    conn.execute("DELETE FROM documents_fts WHERE rowid=?", (doc_id,))
+    if text.strip():
+        conn.execute(
+            "INSERT INTO documents_fts(rowid, original_name, doc_text) VALUES (?,?,?)",
+            (doc_id, original_name, text[:500_000]),
+        )
+    conn.commit()
+    conn.close()
+    print(f"Doc {doc_id} indexed: {len(text)} chars")
+
+
+def _build_fin_context(company_id: int) -> str:
+    """从 company_financials 提取关键财务指标，格式化成 AI 可读的上下文。"""
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM company_financials WHERE company_id=? ORDER BY year DESC LIMIT 3",
+        (company_id,),
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return ""
+
+    # 从报表科目列表中按名称取值
+    def _get(items: list, *names) -> Optional[float]:
+        for item in items:
+            if item.get("name") in names:
+                v = item.get("current")
+                return v if v is not None else item.get("prev")
+        return None
+
+    KEY_METRICS = [
+        ("资产总计",   ["资产总计", "资产合计"]),
+        ("负债合计",   ["负债合计", "负债总计"]),
+        ("所有者权益", ["所有者权益合计", "股东权益合计", "归属于母公司所有者权益合计"]),
+        ("营业收入",   ["营业收入", "一、营业收入"]),
+        ("净利润",     ["净利润", "七、净利润", "四、净利润"]),
+        ("经营现金流", ["经营活动产生的现金流量净额"]),
+    ]
+
+    lines = ["【财务数据（单位：万元）】"]
+    for row in rows:
+        year = row["year"]
+        unit = row.get("unit") or "万元"
+        bs   = json.loads(row["balance_sheet"] or "[]")
+        inc  = json.loads(row["income"] or "[]")
+        cf   = json.loads(row["cash_flow_consolidated"] or "[]")
+        lines.append(f"\n{year}年（合并报表）：")
+        for label, names in KEY_METRICS:
+            src = cf if "现金流" in label else (inc if "营业" in label or "净利润" in label else bs)
+            v = _get(src, *names)
+            lines.append(f"  {label}：{v:.2f} 万元" if v is not None else f"  {label}：—")
+    return "\n".join(lines)
+
+
+def _search_doc_chunks(company_id: int, query: str, limit: int = 4) -> list:
+    """在该客户的文档 FTS 中检索与问题相关的段落。"""
+    import re
+    # 提取2字以上中文词组 + 4位数字（年份）
+    terms = re.findall(r'[一-鿿]{2,}|[0-9]{4}', query)
+    if not terms:
+        return []
+    # 每个词单独匹配（OR），避免短语匹配失败
+    fts_query = " OR ".join(f'"{t}"' for t in terms[:12])
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """SELECT d.original_name,
+                      snippet(documents_fts, 1, '【', '】', '...', 40) AS snip
+               FROM documents_fts
+               JOIN documents d ON d.id = documents_fts.rowid
+               WHERE d.company_id = ? AND documents_fts MATCH ?
+               ORDER BY rank
+               LIMIT ?""",
+            (company_id, fts_query, limit),
+        ).fetchall()
+        return [f"[{r[0]}] {r[1]}" for r in rows]
+    except Exception as e:
+        print(f"FTS search error: {e}")
+        return []
+    finally:
+        conn.close()
+
+
 async def _extract_pages_vision(pdf_path: Path) -> dict:
     """把PDF各页转图片，用视觉AI提取财务报表（合并+本部×3表）"""
     import fitz, base64 as _b64, re as _re
@@ -1696,7 +1891,7 @@ async def _extract_pages_vision(pdf_path: Path) -> dict:
 
     for idx in candidate_pages:
         page = pdf[idx]
-        mat = fitz.Matrix(1.5, 1.5)
+        mat = fitz.Matrix(2.0, 2.0)
         pix = page.get_pixmap(matrix=mat)
         b64 = _b64.b64encode(pix.tobytes("png")).decode()
 
@@ -1818,6 +2013,7 @@ async def extract_financial(company_id: int):
     except HTTPException:
         raise
     except Exception as e:
+        import traceback; traceback.print_exc()
         raise HTTPException(500, f"提取失败：{e}")
 
     if not any(result[k] for k in ("balance_sheet", "income", "balance_sheet_parent",
@@ -1825,6 +2021,28 @@ async def extract_financial(company_id: int):
         raise HTTPException(400, "未识别到财务报表，请确认文档包含资产负债表、利润表或现金流量表")
 
     result["source_doc"] = doc["original_name"]
+    return result
+
+
+@app.post("/api/companies/{company_id}/financials/extract-excel")
+async def extract_financial_excel(company_id: int, file: UploadFile = File(...)):
+    """直接上传 Excel 报表文件，解析后返回财务数据（不保存到文档库）。"""
+    ext = Path(file.filename).suffix.lower()
+    if ext not in (".xlsx", ".xls", ".xlsm"):
+        raise HTTPException(400, "请上传 Excel 文件（.xlsx / .xls / .xlsm）")
+    tmp_path = UPLOAD_DIR / f"_tmp_{uuid.uuid4().hex}{ext}"
+    try:
+        tmp_path.write_bytes(await file.read())
+        result = _extract_excel(tmp_path)
+    except Exception as e:
+        raise HTTPException(500, f"解析失败：{e}")
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+    if not any(result[k] for k in ("balance_sheet", "income", "balance_sheet_parent",
+                                    "income_parent", "cash_flow_consolidated", "cash_flow_parent")):
+        raise HTTPException(400, "未识别到财务报表，请确认 Sheet 名称包含「资产负债」「利润」「现金流量」等关键词")
+    result["source_doc"] = file.filename
     return result
 
 

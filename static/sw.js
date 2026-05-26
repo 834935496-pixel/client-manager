@@ -1,5 +1,5 @@
-const CACHE = "client-manager-v34";
-const STATIC = ["/", "/style.css?v=12", "/app.js?v=39", "/manifest.json", "/icon-192.png", "/icon-512.png"];
+const CACHE = "client-manager-v42";
+const STATIC = ["/", "/style.css?v=15", "/app.js?v=47", "/manifest.json", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(STATIC)));
@@ -10,13 +10,8 @@ self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim().then(() => {
-    self.clients.matchAll({ type: "window" }).then((clients) => {
-      clients.forEach((c) => c.navigate(c.url));
-    });
-  });
 });
 
 self.addEventListener("fetch", (e) => {

@@ -16,6 +16,7 @@ def init_db():
     conn = get_db()
     _migrate_if_needed(conn)
     _add_company_ext_fields(conn)
+    _add_doc_index_fields(conn)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS companies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -197,6 +198,23 @@ def _add_company_ext_fields(conn):
     for col, defn in fin_new:
         if col not in fin_cols:
             conn.execute(f"ALTER TABLE company_financials ADD COLUMN {col} {defn}")
+    conn.commit()
+
+
+def _add_doc_index_fields(conn):
+    doc_cols = {r[1] for r in conn.execute("PRAGMA table_info(documents)").fetchall()}
+    if "doc_text" not in doc_cols:
+        conn.execute("ALTER TABLE documents ADD COLUMN doc_text TEXT DEFAULT ''")
+    if "doc_indexed" not in doc_cols:
+        conn.execute("ALTER TABLE documents ADD COLUMN doc_indexed INTEGER DEFAULT 0")
+    # FTS5 全文检索表（每个文档对应一行）
+    conn.execute("""
+        CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
+            original_name,
+            doc_text,
+            tokenize='unicode61'
+        )
+    """)
     conn.commit()
 
 

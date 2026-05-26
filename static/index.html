@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1a3a6b">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-title" content="客户档案">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=15">
 </head>
 <body>
 <div id="app">
@@ -134,6 +134,8 @@
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-outline btn-sm" onclick="addFinYear()">＋年份</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('fin-excel-input').click()" id="fin-excel-btn">📊 上传Excel</button>
+          <input type="file" id="fin-excel-input" accept=".xlsx,.xls,.xlsm" style="display:none" onchange="handleFinExcelUpload(this)">
           <button class="btn btn-primary btn-sm" onclick="extractFinancials()" id="fin-extract-btn">🤖 AI提取</button>
           <button class="btn btn-outline btn-sm" onclick="saveFinYear()" id="fin-save-btn" style="display:none;">💾 保存</button>
           <button class="btn btn-outline btn-sm" onclick="deleteFinancials()" id="fin-delete-btn" style="display:none;">删除</button>
@@ -188,16 +190,16 @@
         <button onclick="quickSearch('哪些客户长时间没有互动记录，可能需要重新联系？')" style="padding:5px 12px;border-radius:20px;border:1px solid var(--border);background:#fff;font-size:12px;cursor:pointer;color:var(--text);">久未联系</button>
       </div>
     </div>
-    <div class="chat-messages" id="chat-messages" style="padding:12px 16px 130px;flex:1;overflow-y:auto;"></div>
+    <div class="chat-messages" id="chat-messages" style="padding:12px 16px 200px;flex:1;overflow-y:auto;"></div>
   </div>
 
   <!-- ── AI 悬浮输入框 ── -->
-  <div id="ai-chat-input-bar" style="display:none;position:fixed;bottom:var(--nav-h);left:0;right:0;z-index:40;background:#fff;border-top:1px solid var(--border);padding:12px 14px;box-shadow:0 -2px 10px rgba(0,0,0,.08);">
+  <div id="ai-chat-input-bar" style="display:none;position:fixed;bottom:var(--nav-h);left:50%;transform:translateX(-50%);width:100%;max-width:480px;z-index:40;background:#fff;border-top:1px solid var(--border);padding:10px 14px 12px;box-shadow:0 -2px 10px rgba(0,0,0,.08);">
     <div style="display:flex;gap:10px;align-items:flex-end;">
       <textarea class="chat-input" id="chat-input" placeholder="问任何客户相关的问题..." rows="2"
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat()}"
-        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,140)+'px'"></textarea>
-      <button class="btn btn-primary" onclick="sendChat()" style="width:auto;flex-shrink:0;align-self:flex-end;padding:12px 18px;font-size:14px;">发送</button>
+        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'"></textarea>
+      <button class="btn btn-primary" onclick="sendChat()" style="width:auto;flex-shrink:0;align-self:flex-end;padding:10px 16px;font-size:14px;">发送</button>
     </div>
   </div>
 
@@ -582,7 +584,7 @@
       </div>
       <input type="file" id="doc-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md" style="display:none" onchange="handleDocUpload(this)">
       <button class="btn btn-primary" id="doc-upload-btn" style="width:100%;" onclick="document.getElementById('doc-file-input').click()">选择文件并上传</button>
-      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('upload-doc-modal')">取消</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" id="doc-upload-cancel-btn" onclick="hideModal('upload-doc-modal')">取消</button>
     </div>
   </div>
 
@@ -652,7 +654,7 @@
   <button class="fab" id="fab" onclick="showQuickAdd()">＋</button>
 
 </div>
-<script src="app.js?v=39"></script>
+<script src="app.js?v=47"></script>
 <script>
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});

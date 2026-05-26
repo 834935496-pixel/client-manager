@@ -47,7 +47,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "36";
+const CLIENT_VERSION = "40";
 
 async function checkVersion() {
   try {
@@ -1039,7 +1039,8 @@ async function sendChat() {
     updateChatBubble(loadingId, data.reply);
     chatHistory.push({ role: "assistant", content: data.reply });
   }
-  document.getElementById("chat-messages").scrollTop = 999999;
+  const msgEl = document.getElementById("chat-messages");
+  msgEl.scrollTop = msgEl.scrollHeight;
 }
 
 function appendChatBubble(text, role) {
@@ -1205,6 +1206,7 @@ const CAT_COLORS = {
 };
 let docFilterCategory = "全部";
 let docUploadCategory = "其他";
+let _cachedDocs = [];
 
 function openUploadDocModal() {
   docUploadCategory = "其他";
@@ -1228,25 +1230,30 @@ function selectDocCategory(cat) {
   });
 }
 
-async function loadDocuments() {
-  const res = await apiFetch(`/api/companies/${currentCompanyId}/documents`);
-  const allDocs = await res.json();
-
+function _renderDocList(allDocs) {
   const filterBar = document.getElementById("doc-filter-bar");
-  filterBar.innerHTML = ["全部", ...DOC_CATEGORIES].map(c => {
-    const active = docFilterCategory === c;
-    return `<button onclick="setDocFilter('${c}')"
-      style="padding:5px 12px;border-radius:20px;border:1px solid ${active ? 'var(--primary)' : 'var(--border)'};background:${active ? 'var(--primary)' : 'transparent'};color:${active ? '#fff' : 'var(--text-muted)'};font-size:12px;cursor:pointer;white-space:nowrap;">${c}</button>`;
-  }).join("");
-
+  if (filterBar) {
+    filterBar.innerHTML = ["全部", ...DOC_CATEGORIES].map(c => {
+      const active = docFilterCategory === c;
+      return `<button onclick="setDocFilter('${c}')"
+        style="padding:5px 12px;border-radius:20px;border:1px solid ${active ? 'var(--primary)' : 'var(--border)'};background:${active ? 'var(--primary)' : 'transparent'};color:${active ? '#fff' : 'var(--text-muted)'};font-size:12px;cursor:pointer;white-space:nowrap;">${c}</button>`;
+    }).join("");
+  }
   const docs = docFilterCategory === "全部" ? allDocs : allDocs.filter(d => (d.category || "其他") === docFilterCategory);
   const el = document.getElementById("docs-list");
+  if (!el) return;
   if (!docs.length) {
     el.innerHTML = `<div class="empty"><div class="empty-icon">📄</div><p>暂无文档</p></div>`;
     return;
   }
   el.innerHTML = docs.map((d) => {
     const color = CAT_COLORS[d.category] || "#6b7280";
+    let indexBadge = "";
+    if (d.doc_indexed === 0) {
+      indexBadge = `<span class="doc-index-badge indexing"><span class="doc-index-spin"></span>索引中</span>`;
+    } else if (d.doc_indexed === 1 && d.doc_text) {
+      indexBadge = `<span class="doc-index-badge indexed">✓ 可检索</span>`;
+    }
     return `
     <div class="card" style="margin-bottom:10px;">
       <div class="card-body" style="padding:12px 14px;display:flex;align-items:center;gap:12px;">
@@ -1254,7 +1261,7 @@ async function loadDocuments() {
         <div style="flex:1;min-width:0;">
           <div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(d.original_name)}</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${formatSize(d.size)} · ${d.uploaded_at.slice(0,10)}</div>
-          <span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;font-size:11px;color:#fff;background:${color};">${d.category || "其他"}</span>
+          <span style="display:inline-block;margin-top:4px;padding:2px 8px;border-radius:10px;font-size:11px;color:#fff;background:${color};">${d.category || "其他"}</span>${indexBadge}
         </div>
         <div style="display:flex;gap:8px;flex-shrink:0;">
           <a href="/api/documents/${d.id}/download" target="_blank"
@@ -1265,6 +1272,13 @@ async function loadDocuments() {
       </div>
     </div>`;
   }).join("");
+}
+
+async function loadDocuments() {
+  const res = await apiFetch(`/api/companies/${currentCompanyId}/documents`);
+  _cachedDocs = await res.json();
+  _renderDocList(_cachedDocs);
+  if (_cachedDocs.some(d => d.doc_indexed === 0)) _startIndexPoll();
 }
 
 function setDocFilter(cat) {
@@ -1282,28 +1296,74 @@ function docIcon(filename) {
   return DOC_ICONS[ext] || "📎";
 }
 
+function _xhrUpload(url, formData, headers) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.addEventListener("load", () => {
+      let data;
+      try { data = JSON.parse(xhr.responseText); } catch { data = {}; }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.detail || `上传失败 ${xhr.status}`));
+    });
+    xhr.addEventListener("error", () => reject(new Error("网络错误，请检查连接")));
+    xhr.send(formData);
+  });
+}
+
+function _btnSpin(btn, label) {
+  btn.disabled = true;
+  btn.innerHTML = `<span class="upload-spin"></span>${label}`;
+}
+function _btnReset(btn, label) {
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+let _indexPollTimer = null;
+function _startIndexPoll() {
+  if (_indexPollTimer) return;
+  let ticks = 0;
+  _indexPollTimer = setInterval(async () => {
+    ticks++;
+    if (ticks > 40) { clearInterval(_indexPollTimer); _indexPollTimer = null; return; }
+    const res = await apiFetch(`/api/companies/${currentCompanyId}/documents`).catch(() => null);
+    if (!res) return;
+    const docs = await res.json();
+    const anyPending = docs.some(d => d.doc_indexed === 0);
+    _renderDocList(docs);
+    if (!anyPending) { clearInterval(_indexPollTimer); _indexPollTimer = null; }
+  }, 3000);
+}
+
 async function handleDocUpload(input) {
   const file = input.files[0];
   if (!file) return;
+  input.value = "";
   const btn = document.getElementById("doc-upload-btn");
-  btn.textContent = "上传中…";
-  btn.disabled = true;
+  const cancelBtn = document.getElementById("doc-upload-cancel-btn");
+  _btnSpin(btn, `上传中…`);
+  cancelBtn.disabled = true;
   const formData = new FormData();
   formData.append("file", file);
   formData.append("category", docUploadCategory);
   try {
-    const res = await fetch(`${API}/api/companies/${currentCompanyId}/documents`, {
-      method: "POST", headers: { "X-Access-Token": token }, body: formData,
-    });
-    if (!res.ok) throw new Error((await res.json()).detail);
-    input.value = "";
+    const newDoc = await _xhrUpload(
+      `${API}/api/companies/${currentCompanyId}/documents`,
+      formData,
+      { "X-Access-Token": token }
+    );
     hideModal("upload-doc-modal");
-    loadDocuments();
+    // 立即将新文件插入列表顶部
+    _cachedDocs = [newDoc, ..._cachedDocs];
+    _renderDocList(_cachedDocs);
+    _startIndexPoll();
   } catch (e) {
     alert("上传失败：" + e.message);
   } finally {
-    btn.textContent = "选择文件并上传";
-    btn.disabled = false;
+    _btnReset(btn, "选择文件并上传");
+    cancelBtn.disabled = false;
   }
 }
 
@@ -1469,15 +1529,11 @@ async function handleTodoDocUpload(input) {
   if (!file) return;
   const todoId = document.getElementById("todo-docs-todo-id").value;
   const btn = document.querySelector("#todo-docs-modal .btn-primary");
-  btn.textContent = "上传中…";
-  btn.disabled = true;
+  _btnSpin(btn, "上传中…");
   const formData = new FormData();
   formData.append("file", file);
   try {
-    const res = await fetch(`${API}/api/todos/${todoId}/documents`, {
-      method: "POST", headers: { "X-Access-Token": token }, body: formData,
-    });
-    if (!res.ok) throw new Error((await res.json()).detail);
+    const newDoc = await _xhrUpload(`${API}/api/todos/${todoId}/documents`, formData, { "X-Access-Token": token });
     input.value = "";
     loadTodoDocs(todoId);
     if (currentPage === "today") loadToday();
@@ -1485,8 +1541,7 @@ async function handleTodoDocUpload(input) {
   } catch (e) {
     alert("上传失败：" + e.message);
   } finally {
-    btn.textContent = "＋ 上传附件";
-    btn.disabled = false;
+    _btnReset(btn, "＋ 上传附件");
   }
 }
 
@@ -1509,6 +1564,9 @@ let finCurYear  = null;
 let finVals     = {};   // {tabKey: {itemName: {c,p}}}
 let finPrevRec  = {};   // {tabKey: {itemName: value}}  来自上一年记录
 let finDirty    = false;
+let finSources  = {};   // {tabKey: {itemName: {c:'ai'|'manual', p:'ai'|'manual'}}}
+let finAiTotals = {};   // {tabKey: {itemName: {c,p}}} AI读取的合计行原始值
+let finErrors   = {};   // {tabKey: {itemName: {c:{computed,aiVal}, p:{computed,aiVal}}}}
 
 const FIN_TABS = [
   { label:"合并资产负债表", key:"balance_sheet",          showRatio:true  },
@@ -1699,6 +1757,36 @@ const FIN_TABS = [
   };
 })();
 
+// ─── 校验引擎 ────────────────────────────────────────────────────────────────
+
+function finValidate() {
+  finErrors = {};
+  const TOL = 1.0; // 1万元容差，避免尾差误报
+  for (const tab of FIN_TABS) {
+    const key = tab.key;
+    finErrors[key] = {};
+    for (const row of (FIN_TEMPLATES[key] || [])) {
+      if (!row.c) continue;
+      const ai = finAiTotals[key]?.[row.n];
+      if (!ai) continue;
+      for (const col of ['c', 'p']) {
+        const computed = finGetVal(key, row.n, col);
+        const aiVal    = ai[col];
+        if (computed == null || aiVal == null) continue;
+        if (Math.abs(computed - aiVal) > TOL) {
+          if (!finErrors[key][row.n]) finErrors[key][row.n] = {};
+          finErrors[key][row.n][col] = { computed, aiVal };
+        }
+      }
+    }
+  }
+  return finErrors;
+}
+
+function _countErrors() {
+  return Object.values(finErrors).reduce((s, t) => s + Object.keys(t).length, 0);
+}
+
 // ─── 计算引擎 ────────────────────────────────────────────────────────────────
 
 function _finGetRaw(key, name, col) {
@@ -1769,8 +1857,11 @@ async function renderFinYear() {
   const data     = await r1.json();
   const prevData = r2 ? await r2.json() : null;
 
-  finVals    = {};
-  finPrevRec = {};
+  finVals     = {};
+  finPrevRec  = {};
+  finSources  = {};
+  finAiTotals = {};
+  finErrors   = {};
   for (const k of allKeys) {
     finVals[k]    = _itemsToVals(data[k]);
     finPrevRec[k] = {};
@@ -1845,24 +1936,44 @@ function _buildFinTable() {
     ].filter(Boolean).join(" ");
     const indent = isHdr || row.t==="total" ? "" : row.t==="subtotal" ? "fin-indent1" : "fin-indent2";
 
-    let cCell, pCell;
+    const errC = finErrors[key]?.[row.n]?.c;
+    const errP = finErrors[key]?.[row.n]?.p;
+    const srcC = finSources[key]?.[row.n]?.c;
+    const srcP = finSources[key]?.[row.n]?.p;
+
+    let cCell;
     if (isHdr) {
       cCell = `<td></td><td></td><td></td>`;
     } else if (isCalc) {
-      cCell = `<td class="fin-val fin-calc">${fmtN(curV)||"—"}</td>
-               <td class="fin-val fin-calc fin-prev">${fmtN(prevV)||"—"}</td>
+      const wC = errC ? ' fin-cell-warn' : '';
+      const wP = errP ? ' fin-cell-warn' : '';
+      const tipC = errC ? ` title="AI读取:${fmtN(errC.aiVal)}  计算:${fmtN(errC.computed)}"` : '';
+      const tipP = errP ? ` title="AI读取:${fmtN(errP.aiVal)}  计算:${fmtN(errP.computed)}"` : '';
+      const badgeC = errC ? `<span class="fin-warn-badge" title="AI:${fmtN(errC.aiVal)}">⚠</span>` : '';
+      const badgeP = errP ? `<span class="fin-warn-badge" title="AI:${fmtN(errP.aiVal)}">⚠</span>` : '';
+      cCell = `<td class="fin-val fin-calc${wC}"${tipC}>${fmtN(curV)||"—"}${badgeC}</td>
+               <td class="fin-val fin-calc fin-prev${wP}"${tipP}>${fmtN(prevV)||"—"}${badgeP}</td>
                <td class="fin-val ${changeClass}" style="font-size:11px;">${changeStr}</td>`;
     } else {
       const esc = row.n.replace(/'/g,"\\'");
-      cCell = `<td class="fin-val fin-editable" onclick="finEdit(this,'${key}','${esc}','c')">${curV!=null?fmtN(curV):'<span class="fin-ph">—</span>'}</td>
-               <td class="fin-val fin-editable fin-prev" onclick="finEdit(this,'${key}','${esc}','p')">${prevV!=null?fmtN(prevV):'<span class="fin-ph">—</span>'}</td>
+      const bgC = srcC === 'ai' ? ' fin-cell-ai' : srcC === 'manual' ? ' fin-cell-manual' : '';
+      const bgP = srcP === 'ai' ? ' fin-cell-ai' : srcP === 'manual' ? ' fin-cell-manual' : '';
+      cCell = `<td class="fin-val fin-editable${bgC}" onclick="finEdit(this,'${key}','${esc}','c')">${curV!=null?fmtN(curV):'<span class="fin-ph">—</span>'}</td>
+               <td class="fin-val fin-editable fin-prev${bgP}" onclick="finEdit(this,'${key}','${esc}','p')">${prevV!=null?fmtN(prevV):'<span class="fin-ph">—</span>'}</td>
                <td class="fin-val ${changeClass}" style="font-size:11px;">${changeStr}</td>`;
     }
 
     return `<tr class="${rc}"><td class="fin-name ${indent}">${row.n}${flagRatio?'<span class="fin-dot fin-dot-r"></span>':''}</td>${cCell}</tr>`;
   }).join("");
 
-  return `<div class="fin-tabs-scroll">${tabBar}</div>
+  const tabErrCount = Object.keys(finErrors[key] || {}).length;
+  const banner = tabErrCount > 0
+    ? `<div class="fin-validation-banner">⚠ ${tabErrCount} 个合计行与明细项目不符（橙色标记），请逐一核对后手动修正</div>`
+    : (Object.keys(finAiTotals[key] || {}).length > 0
+        ? `<div class="fin-ok-banner">✓ 合计关系校验通过</div>`
+        : '');
+
+  return `<div class="fin-tabs-scroll">${tabBar}</div>${banner}
 <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
 <table class="fin-table"><thead>${thead}</thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -1893,6 +2004,10 @@ function finSave(input, key, name, col) {
   } else {
     finVals[key][name].c = val;
   }
+  if (!finSources[key]) finSources[key] = {};
+  if (!finSources[key][name]) finSources[key][name] = {c: null, p: null};
+  finSources[key][name][col] = 'manual';
+  if (Object.keys(finAiTotals).length > 0) finValidate();
   finDirty = true;
   renderFinContent();
   _updateSaveBtn();
@@ -1923,9 +2038,12 @@ function addFinYear() {
   finYears.sort((a, b) => b - a);
   finYearIdx = finYears.indexOf(y);
   finCurYear = y;
-  finVals    = Object.fromEntries(FIN_TABS.map(t => [t.key, {}]));
-  finPrevRec = Object.fromEntries(FIN_TABS.map(t => [t.key, {}]));
-  finDirty   = false;
+  finVals     = Object.fromEntries(FIN_TABS.map(t => [t.key, {}]));
+  finPrevRec  = Object.fromEntries(FIN_TABS.map(t => [t.key, {}]));
+  finSources  = Object.fromEntries(FIN_TABS.map(t => [t.key, {}]));
+  finAiTotals = Object.fromEntries(FIN_TABS.map(t => [t.key, {}]));
+  finErrors   = Object.fromEntries(FIN_TABS.map(t => [t.key, {}]));
+  finDirty    = false;
   document.getElementById("fin-year-label").textContent = y + "年";
   _showFinToolbar(true);
   _updateSaveBtn();
@@ -1972,58 +2090,98 @@ async function extractFinancials() {
     if (!res.ok) { const d = await res.json(); alert("提取失败：" + (d.detail||"未知错误")); return; }
     const data = await res.json();
     if (!data.year) { alert("AI未能识别年份，请检查PDF内容"); return; }
+    _applyExtractedFinData(data);
+  } catch(e) {
+    alert("提取失败：" + e.message);
+  } finally {
+    btn.textContent = "🤖 AI提取"; btn.disabled = false;
+  }
+}
 
-    const allKeys = FIN_TABS.map(t => t.key);
+// ─── 通用：将提取结果填入财务表格 ────────────────────────────────────────────
 
-    // 把提取结果映射进 finVals（按名称匹配标准科目）
-    const _normName = s => s.replace(/^[\s　]*[（(]?[一二三四五六七八九十\d]+[）)]?[、。.：: ]+/, '').trim();
-    const isNewYear = !finYears.includes(data.year);
+function _applyExtractedFinData(data) {
+  const allKeys = FIN_TABS.map(t => t.key);
+  const _normName = s => s.replace(/^[\s　]*[（(]?[一二三四五六七八九十\d]+[）)]?[、。.：: ]+/, '').trim();
+  const isNewYear = !finYears.includes(data.year);
 
-    if (isNewYear) {
-      finYears.push(data.year);
-      finYears.sort((a, b) => b - a);
-      finYearIdx = finYears.indexOf(data.year);
-      finCurYear = data.year;
-      document.getElementById("fin-year-label").textContent = data.year + "年";
-      finVals    = Object.fromEntries(allKeys.map(k => [k, {}]));
-      finPrevRec = Object.fromEntries(allKeys.map(k => [k, {}]));
+  if (isNewYear) {
+    finYears.push(data.year);
+    finYears.sort((a, b) => b - a);
+    finYearIdx = finYears.indexOf(data.year);
+    finCurYear = data.year;
+    document.getElementById("fin-year-label").textContent = data.year + "年";
+    finVals     = Object.fromEntries(allKeys.map(k => [k, {}]));
+    finPrevRec  = Object.fromEntries(allKeys.map(k => [k, {}]));
+    finSources  = Object.fromEntries(allKeys.map(k => [k, {}]));
+    finAiTotals = Object.fromEntries(allKeys.map(k => [k, {}]));
+    finErrors   = Object.fromEntries(allKeys.map(k => [k, {}]));
+  }
+
+  for (const k of allKeys) {
+    const raw = data[k] || [];
+    const lookup = {};
+    for (const it of raw) {
+      if (!it.name) continue;
+      lookup[it.name] = it;
+      lookup[_normName(it.name)] = it;
     }
-
-    for (const k of allKeys) {
-      const raw = data[k] || [];
-      const lookup = {};
-      for (const it of raw) {
-        if (!it.name) continue;
-        lookup[it.name] = it;
-        lookup[_normName(it.name)] = it;
-      }
-      if (!finVals[k]) finVals[k] = {};
-      for (const row of (FIN_TEMPLATES[k] || [])) {
-        if (row.t === "header" || row.c) continue;
-        const match = lookup[row.n] || lookup[_normName(row.n)];
+    if (!finVals[k])     finVals[k]     = {};
+    if (!finSources[k])  finSources[k]  = {};
+    if (!finAiTotals[k]) finAiTotals[k] = {};
+    for (const row of (FIN_TEMPLATES[k] || [])) {
+      if (row.t === "header") continue;
+      const match = lookup[row.n] || lookup[_normName(row.n)];
+      if (row.c) {
+        if (match) finAiTotals[k][row.n] = { c: match.current ?? null, p: match.prev ?? null };
+      } else {
         if (match) {
           finVals[k][row.n] = { c: match.current ?? null, p: match.prev ?? null };
           if (match.prev != null) {
             if (!finPrevRec[k]) finPrevRec[k] = {};
             finPrevRec[k][row.n] = match.prev;
           }
+          finSources[k][row.n] = {
+            c: match.current != null ? 'ai' : null,
+            p: match.prev    != null ? 'ai' : null,
+          };
         }
       }
     }
+  }
 
-    _showFinToolbar(true);
-    finDirty = true;
-    renderFinContent();
-    _updateSaveBtn();
+  finValidate();
+  _showFinToolbar(true);
+  finDirty = true;
+  renderFinContent();
+  _updateSaveBtn();
 
-    const filled = allKeys.filter(k => Object.values(finVals[k]||{}).some(v=>v.c!=null));
-    const lbl = {balance_sheet:"合并资产负债表",income:"合并利润表",balance_sheet_parent:"本部资产负债表",
-                 income_parent:"本部利润表",cash_flow_consolidated:"合并现金流量表",cash_flow_parent:"本部现金流量表"};
-    alert(`✅ 已填入 ${data.year} 年数据：${filled.map(k=>lbl[k]).join("、")||"无"}\n请检查后点击「💾 保存」`);
+  const filled = allKeys.filter(k => Object.values(finVals[k]||{}).some(v=>v.c!=null));
+  const lbl = {balance_sheet:"合并资产负债表",income:"合并利润表",balance_sheet_parent:"本部资产负债表",
+               income_parent:"本部利润表",cash_flow_consolidated:"合并现金流量表",cash_flow_parent:"本部现金流量表"};
+  const errN = _countErrors();
+  const errMsg = errN > 0 ? `\n⚠ ${errN} 个合计行与明细不符，已标橙色，请核对` : '\n✓ 合计关系校验通过';
+  alert(`✅ 已填入 ${data.year} 年数据：${filled.map(k=>lbl[k]).join("、")||"无"}${errMsg}\n请检查后点击「💾 保存」`);
+}
+
+// ─── Excel 上传提取 ──────────────────────────────────────────────────────────
+
+async function handleFinExcelUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = "";
+  const btn = document.getElementById("fin-excel-btn");
+  _btnSpin(btn, "解析中…");
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+    const data = await _xhrUpload(`${API}/api/companies/${currentCompanyId}/financials/extract-excel`, formData, { "X-Access-Token": token });
+    if (!data.year) { alert("未能识别年份，请确认 Excel 中含有年份信息（如 2024）"); return; }
+    _applyExtractedFinData(data);
   } catch(e) {
-    alert("提取失败：" + e.message);
+    alert("解析失败：" + e.message);
   } finally {
-    btn.textContent = "🤖 AI提取"; btn.disabled = false;
+    _btnReset(btn, "📊 上传Excel");
   }
 }
 
@@ -2033,7 +2191,7 @@ function deleteFinancials() {
   if (!finCurYear) return;
   showConfirm(`删除 ${finCurYear} 年财务数据？`, async () => {
     await apiFetch(`/api/companies/${currentCompanyId}/financials/${finCurYear}`, { method:"DELETE" });
-    finVals = {}; finPrevRec = {}; finDirty = false;
+    finVals = {}; finPrevRec = {}; finSources = {}; finAiTotals = {}; finErrors = {}; finDirty = false;
     await loadFinancials();
   });
 }
