@@ -2,6 +2,7 @@ import os
 import httpx
 from openai import OpenAI
 
+# 本地 Ollama（仅 Mac 本地运行时可用）
 FAST_MODEL = "qwen2.5:14b"
 DEEP_MODEL = "qwen2.5:72b-128k"
 
@@ -14,12 +15,24 @@ local_client = OpenAI(
     http_client=_local_http_client,
 )
 
+# DeepSeek API（快速/深度模式，云端可用）
+DS_FAST_MODEL = os.getenv("DS_FAST_MODEL", "deepseek-chat")
+DS_DEEP_MODEL = os.getenv("DS_DEEP_MODEL", "deepseek-reasoner")
 
+def get_ds_client():
+    return OpenAI(
+        base_url=os.getenv("DS_BASE_URL", "https://api.deepseek.com/v1"),
+        api_key=os.getenv("DS_API_KEY", ""),
+    )
+
+# Kimi/Moonshot（云端/联网模式）
 def get_cloud_client():
     return OpenAI(
-        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+        base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.moonshot.cn/v1"),
         api_key=os.getenv("DEEPSEEK_API_KEY", ""),
     )
+
+USE_LOCAL_AI = os.getenv("USE_LOCAL_AI", "false").lower() == "true"
 
 
 SYSTEM_PROMPT = """你是一位银行对公业务AI助理，协助客户经理管理企业客户关系。
@@ -34,22 +47,38 @@ def chat(messages: list, mode: str = "fast") -> str:
 
     if mode == "cloud":
         client = get_cloud_client()
-        model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        model = os.getenv("DEEPSEEK_MODEL", "moonshot-v1-32k")
         resp = client.chat.completions.create(
             model=model,
             messages=full_messages,
             max_tokens=4096,
         )
     elif mode == "deep":
-        resp = local_client.chat.completions.create(
-            model=DEEP_MODEL,
-            messages=full_messages,
-        )
+        if USE_LOCAL_AI:
+            resp = local_client.chat.completions.create(
+                model=DEEP_MODEL,
+                messages=full_messages,
+            )
+        else:
+            client = get_ds_client()
+            resp = client.chat.completions.create(
+                model=DS_DEEP_MODEL,
+                messages=full_messages,
+                max_tokens=8000,
+            )
     else:
-        resp = local_client.chat.completions.create(
-            model=FAST_MODEL,
-            messages=full_messages,
-        )
+        if USE_LOCAL_AI:
+            resp = local_client.chat.completions.create(
+                model=FAST_MODEL,
+                messages=full_messages,
+            )
+        else:
+            client = get_ds_client()
+            resp = client.chat.completions.create(
+                model=DS_FAST_MODEL,
+                messages=full_messages,
+                max_tokens=4096,
+            )
 
     return resp.choices[0].message.content
 
