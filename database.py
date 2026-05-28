@@ -14,9 +14,6 @@ def get_db():
 
 def init_db():
     conn = get_db()
-    _migrate_if_needed(conn)
-    _add_company_ext_fields(conn)
-    _add_doc_index_fields(conn)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS companies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -139,6 +136,9 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_financials_company ON company_financials(company_id);
     """)
     conn.commit()
+    _migrate_if_needed(conn)
+    _add_company_ext_fields(conn)
+    _add_doc_index_fields(conn)
     conn.close()
 
 
