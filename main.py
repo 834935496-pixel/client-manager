@@ -17,7 +17,7 @@ load_dotenv()
 
 from database import get_db, init_db, row_to_dict
 from ai_service import chat, chat_with_web_search, build_company_context
-from push_service import init_vapid, get_public_key, send_push, send_daily_push
+from push_service import init_vapid, get_public_key, send_push, send_daily_push, send_bark_push, enable_bark, disable_bark, is_bark_enabled
 
 app = FastAPI(title="客户档案系统")
 
@@ -1011,52 +1011,30 @@ def delete_document(doc_id: int):
     return {"ok": True}
 
 
-# ── Web Push ──────────────────────────────────────────────────────────────────
-
-class PushSubBody(BaseModel):
-    endpoint: str
-    p256dh: str
-    auth: str
+# ── Bark Push ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/push/vapid-key")
 def push_vapid_key():
-    return {"public_key": get_public_key()}
+    return {"public_key": "bark", "enabled": is_bark_enabled()}
 
 @app.post("/api/push/subscribe")
-def push_subscribe(body: PushSubBody):
-    conn = get_db()
-    conn.execute(
-        """INSERT INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?,?,?)
-           ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth""",
-        (body.endpoint, body.p256dh, body.auth),
-    )
-    conn.commit()
-    conn.close()
+def push_subscribe():
+    enable_bark()
     return {"ok": True}
 
 @app.delete("/api/push/subscribe")
-def push_unsubscribe(body: PushSubBody):
-    conn = get_db()
-    conn.execute("DELETE FROM push_subscriptions WHERE endpoint=?", (body.endpoint,))
-    conn.commit()
-    conn.close()
+def push_unsubscribe():
+    disable_bark()
     return {"ok": True}
 
 @app.post("/api/push/test")
 def push_test():
-    conn = get_db()
-    subs = conn.execute("SELECT * FROM push_subscriptions").fetchall()
-    conn.close()
-    if not subs:
-        raise HTTPException(400, "尚未订阅推送，请先在浏览器中开启通知权限")
-    ok_count = 0
-    for sub in subs:
-        if send_push(sub["endpoint"], sub["p256dh"], sub["auth"],
-                     "📋 推送测试成功", "每天早上 8 点将自动发送今日待办提醒"):
-            ok_count += 1
-    if ok_count == 0:
-        raise HTTPException(500, "推送发送失败，请检查网络或重新订阅")
-    return {"ok": True, "sent": ok_count}
+    if not is_bark_enabled():
+        raise HTTPException(400, "Bark 推送未开启，请先点击「开启推送」")
+    ok = send_bark_push("📋 推送测试成功", "每天早上 8 点将自动发送今日待办提醒")
+    if not ok:
+        raise HTTPException(500, "推送发送失败，请检查服务器网络")
+    return {"ok": True}
 
 
 # ── 财务状况 ─────────────────────────────────────────────────────────────────

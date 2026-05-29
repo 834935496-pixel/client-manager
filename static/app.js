@@ -1396,54 +1396,32 @@ async function showPushModal() {
 async function refreshPushStatus() {
   const statusEl = document.getElementById("push-status");
   const btn = document.getElementById("push-toggle-btn");
-  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
-    statusEl.innerHTML = "⚠️ 当前浏览器不支持推送通知<br><small>请使用 Safari（iOS 16.4+）或 Chrome</small>";
-    btn.disabled = true; btn.textContent = "不支持";
-    return;
-  }
-  const perm = Notification.permission;
-  const reg = await navigator.serviceWorker.ready;
-  const sub = await reg.pushManager.getSubscription();
-  if (sub) {
-    statusEl.innerHTML = "✅ 推送已开启，每天 08:00 自动提醒";
-    statusEl.style.color = "var(--success)";
-    btn.textContent = "关闭推送"; btn.className = "btn btn-outline";
-  } else if (perm === "denied") {
-    statusEl.innerHTML = "🚫 通知权限已被拒绝<br><small>请在系统设置中手动开启</small>";
-    btn.disabled = true; btn.textContent = "权限被拒绝";
-  } else {
-    statusEl.innerHTML = "🔕 推送未开启";
-    statusEl.style.color = "var(--text-muted)";
-    btn.textContent = "开启推送"; btn.className = "btn btn-primary";
+  try {
+    const res = await apiFetch("/api/push/vapid-key");
+    const { enabled } = await res.json();
+    if (enabled) {
+      statusEl.innerHTML = "✅ 推送已开启，每天 08:00 自动提醒";
+      statusEl.style.color = "var(--success)";
+      btn.textContent = "关闭推送"; btn.className = "btn btn-outline";
+    } else {
+      statusEl.innerHTML = "🔕 推送未开启";
+      statusEl.style.color = "var(--text-muted)";
+      btn.textContent = "开启推送"; btn.className = "btn btn-primary";
+    }
+    btn.disabled = false;
+  } catch(e) {
+    statusEl.innerHTML = "⚠️ 无法获取推送状态";
   }
 }
 
 async function togglePush() {
-  const reg = await navigator.serviceWorker.ready;
-  const sub = await reg.pushManager.getSubscription();
-  if (sub) {
-    await apiFetch("/api/push/subscribe", {
-      method: "DELETE",
-      body: JSON.stringify({ endpoint: sub.endpoint, p256dh: btoa(String.fromCharCode(...new Uint8Array(sub.getKey("p256dh")))), auth: btoa(String.fromCharCode(...new Uint8Array(sub.getKey("auth")))) }),
-    });
-    await sub.unsubscribe();
+  const btn = document.getElementById("push-toggle-btn");
+  const res = await apiFetch("/api/push/vapid-key");
+  const { enabled } = await res.json();
+  if (enabled) {
+    await apiFetch("/api/push/subscribe", { method: "DELETE" });
   } else {
-    const perm = await Notification.requestPermission();
-    if (perm !== "granted") { alert("请允许通知权限"); return; }
-    // Always unsubscribe any cached subscription first to get a fresh one tied to the current VAPID key
-    const existingSub = await reg.pushManager.getSubscription();
-    if (existingSub) await existingSub.unsubscribe();
-    const keyRes = await apiFetch("/api/push/vapid-key");
-    const { public_key } = await keyRes.json();
-    const newSub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlB64ToUint8Array(public_key),
-    });
-    const j = newSub.toJSON();
-    await apiFetch("/api/push/subscribe", {
-      method: "POST",
-      body: JSON.stringify({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }),
-    });
+    await apiFetch("/api/push/subscribe", { method: "POST" });
   }
   await refreshPushStatus();
 }
