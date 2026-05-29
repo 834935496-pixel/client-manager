@@ -1396,6 +1396,7 @@ async function showPushModal() {
 async function refreshPushStatus() {
   const statusEl = document.getElementById("push-status");
   const btn = document.getElementById("push-toggle-btn");
+  btn.disabled = false;
   try {
     const res = await apiFetch("/api/push/vapid-key");
     const { enabled } = await res.json();
@@ -1408,9 +1409,9 @@ async function refreshPushStatus() {
       statusEl.style.color = "var(--text-muted)";
       btn.textContent = "开启推送"; btn.className = "btn btn-primary";
     }
-    btn.disabled = false;
   } catch(e) {
     statusEl.innerHTML = "⚠️ 无法获取推送状态";
+    btn.textContent = "开启推送"; btn.className = "btn btn-primary";
   }
 }
 
