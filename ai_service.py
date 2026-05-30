@@ -16,8 +16,8 @@ local_client = OpenAI(
 )
 
 # DeepSeek API（快速/深度模式，云端可用）
-DS_FAST_MODEL = os.getenv("DS_FAST_MODEL", "deepseek-chat")
-DS_DEEP_MODEL = os.getenv("DS_DEEP_MODEL", "deepseek-reasoner")
+DS_FAST_MODEL = os.getenv("DS_FAST_MODEL", "deepseek-v4-flash")
+DS_DEEP_MODEL = os.getenv("DS_DEEP_MODEL", "deepseek-v4-pro")
 
 def get_ds_client():
     return OpenAI(
