@@ -93,10 +93,14 @@ async def deploy_webhook(token: str = ""):
     if ACCESS_PASSWORD and token != ACCESS_PASSWORD:
         raise HTTPException(status_code=401, detail="未授权")
     import subprocess
+    cwd = str(Path(__file__).parent)
+    subprocess.run(["git", "clean", "-fd", "--exclude=*.db", "--exclude=.env",
+                    "--exclude=uploads", "--exclude=*.log", "--exclude=*.pem", "--exclude=*.txt"],
+                   cwd=cwd, capture_output=True)
     result = subprocess.run(
         ["git", "pull", "origin", "main"],
         capture_output=True, text=True,
-        cwd=str(Path(__file__).parent)
+        cwd=cwd
     )
     output = result.stdout + result.stderr
     if result.returncode != 0:

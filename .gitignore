@@ -9,3 +9,5 @@ push_subscriptions.debug
 encrypted.data
 vapid_private.pem
 vapid_public.txt
+.DS_Store
+deploy.sh
