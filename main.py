@@ -1901,7 +1901,25 @@ def _classify_sheet(sheet_name: str, rows: list = None) -> Optional[str]:
     return None
 
 
-def _extract_excel(file_path: Path) -> dict:
+_PARENT_KEYWORDS = ["母公司", "本部", "本公司", "单体", "parent"]
+_CONSOLIDATED_KEYWORDS = ["合并", "consolidated", "集团"]
+_PARENT_KEY_MAP = {
+    "balance_sheet":          "balance_sheet_parent",
+    "income":                 "income_parent",
+    "cash_flow_consolidated": "cash_flow_parent",
+}
+
+def _filename_is_parent(name: str) -> Optional[bool]:
+    """从文件名/sheet名判断是否母公司报表。返回 True/False/None(无法判断)。"""
+    n = name.lower()
+    if any(kw in n for kw in _PARENT_KEYWORDS):
+        return True
+    if any(kw in n for kw in _CONSOLIDATED_KEYWORDS):
+        return False
+    return None
+
+
+def _extract_excel(file_path: Path, filename: str = "") -> dict:
     """Parse financial Excel file and return same dict structure as _extract_pages_vision."""
     suffix = file_path.suffix.lower()
     if suffix in (".xlsx", ".xlsm"):
@@ -1909,15 +1927,24 @@ def _extract_excel(file_path: Path) -> dict:
     else:
         sheets = _read_xls_sheets(file_path)
 
+    # 从文件名判断整体是否母公司报表
+    file_is_parent = _filename_is_parent(filename or file_path.stem)
+
     result = {k: [] for k in _TMPL_MAP}
     result["unit"] = "万元"
     result["year"] = None
     result["prev_year"] = None
 
-    print(f"Excel sheets: {list(sheets.keys())}")
+    print(f"Excel '{filename}' sheets: {list(sheets.keys())}, file_is_parent={file_is_parent}")
     assigned = set()
     for sheet_name, rows in sheets.items():
         key = _classify_sheet(sheet_name, rows)
+        # 如果 key 是通用分类，根据文件名或 sheet 名决定是否映射到母公司版本
+        if key in _PARENT_KEY_MAP:
+            sheet_is_parent = _filename_is_parent(sheet_name)
+            is_parent = sheet_is_parent if sheet_is_parent is not None else file_is_parent
+            if is_parent:
+                key = _PARENT_KEY_MAP[key]
         print(f"  sheet '{sheet_name}' → {key}")
         if key is None or key in assigned:
             continue
@@ -2312,7 +2339,7 @@ async def extract_financial_excel(company_id: int, file: UploadFile = File(...))
     tmp_path = UPLOAD_DIR / f"_tmp_{uuid.uuid4().hex}{ext}"
     try:
         tmp_path.write_bytes(await file.read())
-        result = _extract_excel(tmp_path)
+        result = _extract_excel(tmp_path, filename=file.filename)
     except Exception as e:
         raise HTTPException(500, f"解析失败：{e}")
     finally:
