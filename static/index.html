@@ -148,7 +148,7 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-outline btn-sm" onclick="addFinYear()">＋年份</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('fin-excel-input').click()" id="fin-excel-btn">📊 上传Excel</button>
-          <input type="file" id="fin-excel-input" accept=".xlsx,.xls,.xlsm" style="display:none" onchange="handleFinExcelUpload(this)">
+          <input type="file" id="fin-excel-input" accept=".xlsx,.xls,.xlsm" multiple style="display:none" onchange="handleFinExcelUpload(this)">
           <button class="btn btn-primary btn-sm" onclick="extractFinancials()" id="fin-extract-btn">🤖 AI提取</button>
           <button class="btn btn-outline btn-sm" onclick="saveFinYear()" id="fin-save-btn" style="display:none;">💾 保存</button>
           <button class="btn btn-outline btn-sm" onclick="deleteFinancials()" id="fin-delete-btn" style="display:none;">删除</button>

@@ -62,7 +62,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "60";
+const CLIENT_VERSION = "61";
 
 async function checkVersion() {
   try {
@@ -2164,22 +2164,40 @@ function _applyExtractedFinData(data) {
 // ─── Excel 上传提取 ──────────────────────────────────────────────────────────
 
 async function handleFinExcelUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
+  const files = Array.from(input.files);
+  if (!files.length) return;
   input.value = "";
   const btn = document.getElementById("fin-excel-btn");
-  _btnSpin(btn, "解析中…");
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
-    const data = await _xhrUpload(`${API}/api/companies/${currentCompanyId}/financials/extract-excel`, formData, { "X-Access-Token": token });
-    if (!data.year) { alert("未能识别年份，请确认 Excel 中含有年份信息（如 2024）"); return; }
-    _applyExtractedFinData(data);
-  } catch(e) {
-    alert("解析失败：" + e.message);
-  } finally {
-    _btnReset(btn, "📊 上传Excel");
+  const merged = {};
+  const errors = [];
+
+  for (let i = 0; i < files.length; i++) {
+    _btnSpin(btn, `解析中 ${i + 1}/${files.length}…`);
+    try {
+      const fd = new FormData();
+      fd.append("file", files[i]);
+      const data = await _xhrUpload(
+        `${API}/api/companies/${currentCompanyId}/financials/extract-excel`,
+        fd, { "X-Access-Token": token }
+      );
+      // 合并：数组取非空的，标量取第一个有值的
+      for (const k of Object.keys(data)) {
+        if (Array.isArray(data[k])) {
+          if (data[k].length > 0 && !(merged[k] && merged[k].length > 0))
+            merged[k] = data[k];
+        } else {
+          if (data[k] != null && merged[k] == null) merged[k] = data[k];
+        }
+      }
+    } catch (e) {
+      errors.push(`${files[i].name}：${e.message}`);
+    }
   }
+
+  _btnReset(btn, "📊 上传Excel");
+  if (errors.length) alert("部分文件解析失败：\n" + errors.join("\n"));
+  if (!merged.year) { alert("未能识别年份，请确认文件名或表头含有年份（如 2024）"); return; }
+  _applyExtractedFinData(merged);
 }
 
 // ─── 删除 ────────────────────────────────────────────────────────────────────
