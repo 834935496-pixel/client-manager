@@ -2310,6 +2310,12 @@ async def extract_financial_excel(company_id: int, file: UploadFile = File(...))
     if not any(result[k] for k in ("balance_sheet", "income", "balance_sheet_parent",
                                     "income_parent", "cash_flow_consolidated", "cash_flow_parent")):
         raise HTTPException(400, "未识别到财务报表，请确认 Sheet 名称包含「资产负债」「利润」「现金流量」等关键词")
+    # 表头没识别到年份时，从文件名提取
+    if not result.get("year"):
+        import re as _re
+        m = _re.search(r'20\d{2}', file.filename)
+        if m:
+            result["year"] = int(m.group())
     result["source_doc"] = file.filename
     return result
 
