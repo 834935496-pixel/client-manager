@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "46";
+const CLIENT_VERSION = "47";
 
 async function checkVersion() {
   try {
@@ -2193,43 +2193,14 @@ function deleteFinancials() {
 
 // ── 股权图谱 ──────────────────────────────────────────────────────────────────
 
-let _equityChart = null;
-
-function _loadECharts() {
-  if (window.echarts) return Promise.resolve();
-  return new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    s.src = "/echarts.min.js";
-    s.onload = resolve;
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-}
-
-function _setEquityStatus(el, msg) {
-  el.querySelector && (el.querySelector("[data-eq-msg]") || {textContent: ""}).textContent !== undefined
-    ? (el.querySelector("[data-eq-msg]").textContent = msg) : null;
-}
-
 async function loadEquityGraph(refresh = false) {
   const el = document.getElementById("equity-chart");
-  const setMsg = (m) => { const d = el.querySelector("[data-eq-msg]"); if (d) d.textContent = m; };
   el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;">
-    <div class="spinner"></div><div data-eq-msg style="font-size:13px;color:var(--text-muted);">加载图表库…</div></div>`;
+    <div class="spinner"></div><div style="font-size:13px;color:var(--text-muted);">Kimi 查询中…</div></div>`;
   document.getElementById("equity-refresh-btn").disabled = true;
-
-  const timer = setTimeout(() => {
-    document.getElementById("equity-refresh-btn").disabled = false;
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">超时，请点🔄刷新重试</div>`;
-  }, 45000);
-
   try {
-    await _loadECharts();
-    setMsg("Kimi 查询中…");
     const res = await apiFetch(`/api/companies/${currentCompanyId}/equity-graph${refresh ? "?refresh=true" : ""}`);
-    setMsg("渲染中…");
     const data = await res.json();
-    clearTimeout(timer);
     document.getElementById("equity-refresh-btn").disabled = false;
     if (data.error) {
       el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--text-muted);">
@@ -2238,63 +2209,53 @@ async function loadEquityGraph(refresh = false) {
     }
     _renderEquityChart(el, data);
   } catch (e) {
-    clearTimeout(timer);
     document.getElementById("equity-refresh-btn").disabled = false;
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">失败：${escHtml(String(e).slice(0, 60))}</div>`;
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败，请点🔄重试</div>`;
   }
 }
 
 function _renderEquityChart(container, data) {
-  if (_equityChart) { try { _equityChart.dispose(); } catch (_) {} }
-  container.innerHTML = "";
-  _equityChart = echarts.init(container, null, { renderer: "svg" });
+  const TYPES = {
+    target:  { color: "#2563eb", bg: "#eff6ff", icon: "🏢", label: "目标企业" },
+    company: { color: "#0891b2", bg: "#ecfeff", icon: "🏭", label: "企业股东" },
+    person:  { color: "#d97706", bg: "#fffbeb", icon: "👤", label: "自然人"   },
+    state:   { color: "#7c3aed", bg: "#f5f3ff", icon: "🏛",  label: "国有/国资"},
+  };
 
-  const TYPE_COLOR = { target: "#2563eb", company: "#0891b2", person: "#d97706", state: "#7c3aed" };
+  function buildNode(node, depth) {
+    const t = TYPES[node.type] || TYPES.company;
+    const isRoot = depth === 0;
+    const children = node.children || [];
+    const card = `
+      <div style="background:${isRoot ? t.color : "#fff"};border:2px solid ${t.color};border-radius:12px;
+        padding:${isRoot ? "14px 16px" : "10px 14px"};box-shadow:0 2px 10px rgba(0,0,0,.08);margin-bottom:${children.length ? "0" : "0"}px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:18px;flex-shrink:0;">${t.icon}</span>
+          <span style="font-size:${isRoot ? "13px" : "12px"};font-weight:600;color:${isRoot ? "#fff" : "#1e293b"};
+            flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(node.name)}">${escHtml(node.name)}</span>
+          ${node.value ? `<span style="font-size:14px;font-weight:700;color:${isRoot ? "rgba(255,255,255,.9)" : t.color};
+            white-space:nowrap;flex-shrink:0;">${escHtml(node.value)}</span>` : ""}
+        </div>
+        <div style="margin-top:5px;">
+          <span style="font-size:10px;padding:2px 8px;border-radius:10px;
+            color:${isRoot ? "rgba(255,255,255,.8)" : t.color};
+            background:${isRoot ? "rgba(255,255,255,.18)" : t.bg};">${t.label}</span>
+        </div>
+      </div>`;
 
-  function processNode(node, depth) {
-    const color = TYPE_COLOR[node.type] || "#64748b";
-    const name = node.name || "";
-    const short = name.length > 9 ? name.slice(0, 8) + "…" : name;
-    return {
-      name: node.name,
-      value: node.value || "",
-      type: node.type,
-      symbolSize: depth === 0 ? [150, 48] : [130, 42],
-      itemStyle: { color, borderColor: "transparent", borderRadius: 8, shadowBlur: depth === 0 ? 12 : 4, shadowColor: color + "55" },
-      label: {
-        position: "inside",
-        formatter: node.value ? `{n|${short}}\n{p|${node.value}}` : `{n|${short}}`,
-        rich: {
-          n: { fontSize: depth === 0 ? 12 : 11, color: "#fff", fontWeight: "600", lineHeight: depth === 0 ? 20 : 18 },
-          p: { fontSize: 10, color: "rgba(255,255,255,0.88)", lineHeight: 15 },
-        },
-      },
-      children: (node.children || []).map(c => processNode(c, depth + 1)),
-    };
+    if (!children.length) return `<div style="margin-bottom:10px;">${card}</div>`;
+
+    return `
+      <div style="margin-bottom:12px;">
+        ${card}
+        <div style="margin-left:18px;padding-left:14px;padding-top:6px;
+          border-left:3px solid ${t.color}40;margin-top:6px;">
+          ${children.map(c => buildNode(c, depth + 1)).join("")}
+        </div>
+      </div>`;
   }
 
-  _equityChart.setOption({
-    backgroundColor: "transparent",
-    tooltip: {
-      trigger: "item",
-      formatter: p => `<b>${p.data.name}</b>${p.data.value ? "<br>持股比例：" + p.data.value : ""}`,
-    },
-    series: [{
-      type: "tree",
-      data: [processNode(data, 0)],
-      top: "20px", left: "20px", right: "20px", bottom: "20px",
-      layout: "orthogonal",
-      orient: "TB",
-      roam: true,
-      expandAndCollapse: false,
-      edgeShape: "polyline",
-      lineStyle: { color: "#cbd5e1", width: 1.5, curveness: 0 },
-      emphasis: { focus: "ancestor" },
-    }],
-  });
-
-  const ro = new ResizeObserver(() => _equityChart && _equityChart.resize());
-  ro.observe(container);
+  container.innerHTML = `<div style="padding:16px;overflow-y:auto;height:100%;box-sizing:border-box;">${buildNode(data, 0)}</div>`;
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
