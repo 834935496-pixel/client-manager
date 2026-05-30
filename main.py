@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "58"
+APP_VERSION = "59"
 
 @app.get("/api/version")
 async def get_version():
@@ -369,6 +369,18 @@ def delete_equity_image(company_id: int):
     for ext in ("jpg", "jpeg", "png", "webp", "gif"):
         p = Path("uploads") / f"equity_{company_id}.{ext}"
         p.unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@app.patch("/api/companies/{company_id}/equity-data")
+async def update_equity_data(company_id: int, request: Request):
+    body = await request.json()
+    data = body.get("data")
+    conn = get_db()
+    conn.execute("UPDATE companies SET equity_data=? WHERE id=?",
+                 (json.dumps(data, ensure_ascii=False) if data is not None else None, company_id))
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 

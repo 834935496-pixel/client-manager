@@ -3,6 +3,8 @@ let token = localStorage.getItem("access_token") || "";
 let currentPage = "today";
 let currentCompanyId = null;
 let currentTab = "info";
+let _equityData = null;
+let _equityNodeMap = {};
 let currentContacts = [];
 let chatHistory = [];
 
@@ -60,7 +62,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "58";
+const CLIENT_VERSION = "59";
 
 async function checkVersion() {
   try {
@@ -2218,6 +2220,7 @@ async function uploadEquityImage(input) {
 }
 
 function _showEquityResult(url, data) {
+  _equityData = (data && !data.error) ? data : null;
   const el = document.getElementById("equity-chart");
   if (data && !data.error) {
     el.innerHTML = `<div style="padding:0;overflow:auto;height:100%;box-sizing:border-box;" id="equity-inner"></div>`;
@@ -2343,9 +2346,12 @@ function _renderEquityChart(container, data) {
   });
 
   let nodesHtml = "";
-  nodes.forEach(({ node, cx, y }) => {
+  const nodeMap = {};
+  nodes.forEach(({ node, cx, y }, i) => {
+    nodeMap[i] = node;
     const t = T[node.type] || T.company;
     const isTarget = node.type === 'target';
+    const editColor = isTarget ? 'rgba(255,255,255,.7)' : '#94a3b8';
     nodesHtml += `<div style="position:absolute;left:${cx-NW/2}px;top:${y}px;width:${NW}px;height:${NH}px;
       background:${isTarget?t.color:'#fff'};border:2px solid ${t.color};border-radius:10px;
       box-shadow:0 2px 8px rgba(0,0,0,${isTarget?.14:.07});
@@ -2354,6 +2360,9 @@ function _renderEquityChart(container, data) {
         <span style="font-size:14px;line-height:1;flex-shrink:0;">${t.icon}</span>
         <span style="font-size:11px;font-weight:600;line-height:1.3;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
           color:${isTarget?'#fff':'#1e293b'};" title="${escHtml(node.name)}">${escHtml(node.name)}</span>
+        <button onclick="event.stopPropagation();_editEquityNode(${i})"
+          style="flex-shrink:0;background:none;border:none;cursor:pointer;padding:2px 0 2px 2px;
+          font-size:12px;line-height:1;color:${editColor};opacity:.8;" title="编辑">✏</button>
       </div>
       <div style="margin-top:3px;">
         <span style="font-size:9px;padding:1px 7px;border-radius:6px;
@@ -2362,6 +2371,7 @@ function _renderEquityChart(container, data) {
       </div>
     </div>`;
   });
+  _equityNodeMap = nodeMap;
 
   container.style.overflow = 'hidden';
   container.style.padding = '0';
@@ -2460,6 +2470,83 @@ function _renderEquityChart(container, data) {
       t0 = { x: e.touches[0].clientX, y: e.touches[0].clientY, n: 1 };
     }
   }, { passive: false });
+}
+
+// ── 股权节点编辑 ──────────────────────────────────────────────────────────────
+
+let _editingNid = null;
+
+function _ensureEquityEditModal() {
+  if (document.getElementById('_eq_edit_modal')) return;
+  const m = document.createElement('div');
+  m.id = '_eq_edit_modal';
+  m.style.cssText = 'display:none;position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.5);align-items:center;justify-content:center;';
+  m.innerHTML = `
+    <div style="background:#fff;border-radius:16px;padding:24px 20px 20px;width:min(92%,360px);box-shadow:0 8px 32px rgba(0,0,0,.18);">
+      <div style="font-size:16px;font-weight:700;margin-bottom:18px;color:#1e293b;">编辑节点</div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:5px;">名称</div>
+        <input id="_eq_edit_name" style="width:100%;border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:14px;outline:none;font-family:inherit;"
+          onkeydown="if(event.key==='Enter')_saveEquityNode()">
+      </div>
+      <div style="margin-bottom:12px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:5px;">持股比例</div>
+        <input id="_eq_edit_value" style="width:100%;border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:14px;outline:none;font-family:inherit;" placeholder="如 51.00%"
+          onkeydown="if(event.key==='Enter')_saveEquityNode()">
+      </div>
+      <div id="_eq_edit_type_row" style="margin-bottom:18px;">
+        <div style="font-size:12px;color:#64748b;margin-bottom:5px;">类型</div>
+        <select id="_eq_edit_type" style="width:100%;border:1px solid #e2e8f0;border-radius:8px;padding:9px 12px;font-size:14px;background:#fff;font-family:inherit;">
+          <option value="company">🏭 企业</option>
+          <option value="person">👤 自然人</option>
+          <option value="state">🏛 国有/国资</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button onclick="_saveEquityNode()" style="flex:1;padding:10px;border-radius:8px;border:none;background:#2563eb;color:#fff;font-size:14px;font-weight:600;cursor:pointer;">保存</button>
+        <button onclick="_closeEquityEdit()" style="flex:1;padding:10px;border-radius:8px;border:1px solid #e2e8f0;background:#fff;color:#475569;font-size:14px;cursor:pointer;">取消</button>
+      </div>
+    </div>`;
+  m.addEventListener('click', e => { if (e.target === m) _closeEquityEdit(); });
+  document.body.appendChild(m);
+}
+
+function _editEquityNode(id) {
+  _ensureEquityEditModal();
+  _editingNid = id;
+  const node = _equityNodeMap[id];
+  document.getElementById('_eq_edit_name').value = node.name || '';
+  document.getElementById('_eq_edit_value').value = node.value || '';
+  const typeRow = document.getElementById('_eq_edit_type_row');
+  if (node.type === 'target') {
+    typeRow.style.display = 'none';
+  } else {
+    typeRow.style.display = 'block';
+    document.getElementById('_eq_edit_type').value = node.type || 'company';
+  }
+  const modal = document.getElementById('_eq_edit_modal');
+  modal.style.display = 'flex';
+  setTimeout(() => document.getElementById('_eq_edit_name').focus(), 80);
+}
+
+function _closeEquityEdit() {
+  const m = document.getElementById('_eq_edit_modal');
+  if (m) m.style.display = 'none';
+}
+
+async function _saveEquityNode() {
+  const node = _equityNodeMap[_editingNid];
+  node.name  = document.getElementById('_eq_edit_name').value.trim();
+  node.value = document.getElementById('_eq_edit_value').value.trim();
+  if (node.type !== 'target') node.type = document.getElementById('_eq_edit_type').value;
+  _closeEquityEdit();
+  try {
+    await apiFetch(`/api/companies/${currentCompanyId}/equity-data`, {
+      method: 'PATCH', body: JSON.stringify({ data: _equityData }),
+    });
+  } catch (_) {}
+  const inner = document.getElementById('equity-inner');
+  if (inner && _equityData) _renderEquityChart(inner, _equityData);
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
