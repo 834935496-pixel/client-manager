@@ -2318,7 +2318,7 @@ function _renderEquityChart(container, data) {
   const downHtml = investments.map(s => buildDown(s, 0)).join("");
 
   container.innerHTML = `<div style="padding:16px;overflow-y:auto;height:100%;box-sizing:border-box;">
-    ${upHtml   ? secLabel("股东结构（上穿2层）","⬆") + upHtml   + arrow : ""}
+    ${upHtml   ? secLabel("股东结构","⬆") + upHtml   + arrow : ""}
     <div style="margin-bottom:8px;">${mkCard(data, true)}</div>
     ${downHtml ? arrow + secLabel("对外投资（下穿2层）","⬇") + downHtml : ""}
     ${!upHtml&&!downHtml?`<div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:8px;">暂无股东/投资数据</div>`:""}
