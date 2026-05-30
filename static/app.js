@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "44";
+const CLIENT_VERSION = "45";
 
 async function checkVersion() {
   try {
@@ -2206,15 +2206,30 @@ function _loadECharts() {
   });
 }
 
+function _setEquityStatus(el, msg) {
+  el.querySelector && (el.querySelector("[data-eq-msg]") || {textContent: ""}).textContent !== undefined
+    ? (el.querySelector("[data-eq-msg]").textContent = msg) : null;
+}
+
 async function loadEquityGraph(refresh = false) {
   const el = document.getElementById("equity-chart");
+  const setMsg = (m) => { const d = el.querySelector("[data-eq-msg]"); if (d) d.textContent = m; };
   el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;">
-    <div class="spinner"></div><div style="font-size:13px;color:var(--text-muted);">Kimi 查询中…</div></div>`;
+    <div class="spinner"></div><div data-eq-msg style="font-size:13px;color:var(--text-muted);">加载图表库…</div></div>`;
   document.getElementById("equity-refresh-btn").disabled = true;
+
+  const timer = setTimeout(() => {
+    document.getElementById("equity-refresh-btn").disabled = false;
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">超时，请点🔄刷新重试</div>`;
+  }, 45000);
+
   try {
     await _loadECharts();
+    setMsg("Kimi 查询中…");
     const res = await apiFetch(`/api/companies/${currentCompanyId}/equity-graph${refresh ? "?refresh=true" : ""}`);
+    setMsg("渲染中…");
     const data = await res.json();
+    clearTimeout(timer);
     document.getElementById("equity-refresh-btn").disabled = false;
     if (data.error) {
       el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--text-muted);">
@@ -2223,8 +2238,9 @@ async function loadEquityGraph(refresh = false) {
     }
     _renderEquityChart(el, data);
   } catch (e) {
+    clearTimeout(timer);
     document.getElementById("equity-refresh-btn").disabled = false;
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败，请点刷新重试</div>`;
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">失败：${escHtml(String(e).slice(0, 60))}</div>`;
   }
 }
 
