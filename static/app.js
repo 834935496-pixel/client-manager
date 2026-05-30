@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "45";
+const CLIENT_VERSION = "46";
 
 async function checkVersion() {
   try {
@@ -2246,6 +2246,7 @@ async function loadEquityGraph(refresh = false) {
 
 function _renderEquityChart(container, data) {
   if (_equityChart) { try { _equityChart.dispose(); } catch (_) {} }
+  container.innerHTML = "";
   _equityChart = echarts.init(container, null, { renderer: "svg" });
 
   const TYPE_COLOR = { target: "#2563eb", company: "#0891b2", person: "#d97706", state: "#7c3aed" };
