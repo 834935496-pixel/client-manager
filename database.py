@@ -176,6 +176,12 @@ def _add_company_ext_fields(conn):
         if "loan_amount" not in prod_cols:
             conn.execute("ALTER TABLE company_products ADD COLUMN loan_amount REAL DEFAULT 0")
 
+    # 股权图缓存字段
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(companies)").fetchall()}
+    for col, defn in [("equity_data", "TEXT"), ("equity_updated_at", "TEXT DEFAULT ''")]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} {defn}")
+
     # 恢复 companies 剩余字段
     existing = {r[1] for r in conn.execute("PRAGMA table_info(companies)").fetchall()}
     new_cols = [

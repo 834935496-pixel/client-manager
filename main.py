@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "40"
+APP_VERSION = "41"
 
 @app.get("/api/version")
 async def get_version():
@@ -272,6 +272,58 @@ class ProductBody(BaseModel):
     start_date: str = ""
     end_date: str = ""
     notes: str = ""
+
+@app.get("/api/companies/{company_id}/equity-graph")
+async def get_equity_graph(company_id: int, refresh: bool = False):
+    conn = get_db()
+    row = conn.execute("SELECT name, equity_data, equity_updated_at FROM companies WHERE id=?", (company_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404)
+    name, cached, cached_at = row["name"], row["equity_data"], row["equity_updated_at"]
+    if cached and not refresh:
+        return json.loads(cached)
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "").rstrip("/")
+    if not api_key or "moonshot" not in base_url:
+        raise HTTPException(status_code=400, detail="需要配置 Kimi API")
+    from openai import OpenAI
+    client = OpenAI(base_url=base_url + "/v1" if not base_url.endswith("/v1") else base_url, api_key=api_key)
+    prompt = f"""你是企业工商信息专家，请查询「{name}」的股权结构。
+严格按如下JSON格式返回，不要输出任何其他内容（不要markdown代码块，不要说明文字）：
+{{
+  "name": "企业全称",
+  "type": "target",
+  "value": "",
+  "children": [
+    {{
+      "name": "股东名称",
+      "type": "company",
+      "value": "51.00%",
+      "children": []
+    }}
+  ]
+}}
+规则：type只能是 target/company/person/state；value为持股比例；企业股东递归填children（最多3层）。
+若无法查询，返回：{{"error": "无法获取{name}的股权信息"}}"""
+    try:
+        resp = client.chat.completions.create(
+            model=os.getenv("DEEPSEEK_MODEL", "moonshot-v1-32k"),
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=3000,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        data = json.loads(raw)
+    except Exception as e:
+        data = {"error": f"查询失败：{str(e)[:100]}"}
+    conn.execute(
+        "UPDATE companies SET equity_data=?, equity_updated_at=datetime('now','localtime') WHERE id=?",
+        (json.dumps(data, ensure_ascii=False), company_id)
+    )
+    conn.commit()
+    conn.close()
+    return data
+
 
 @app.get("/api/companies/{company_id}/products")
 def list_company_products(company_id: int):

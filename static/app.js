@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "40";
+const CLIENT_VERSION = "41";
 
 async function checkVersion() {
   try {
@@ -301,6 +301,7 @@ async function switchTab(tab) {
   if (tab === "todos") loadCompanyTodos();
   if (tab === "docs") loadDocuments();
   if (tab === "finance") loadFinancials();
+  if (tab === "equity") loadEquityGraph();
 }
 
 const PRODUCT_COLORS = { "资产类": "#e8f0fe", "负债类": "#e6f4ea", "中间业务": "#fff3e0" };
@@ -2186,6 +2187,99 @@ function deleteFinancials() {
     finVals = {}; finPrevRec = {}; finSources = {}; finAiTotals = {}; finErrors = {}; finDirty = false;
     await loadFinancials();
   });
+}
+
+// ── 股权图谱 ──────────────────────────────────────────────────────────────────
+
+let _equityChart = null;
+
+function _loadECharts() {
+  if (window.echarts) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js";
+    s.onload = resolve;
+    s.onerror = () => {
+      s.src = "https://cdn.staticfile.org/echarts/5.4.3/echarts.min.js";
+      document.head.appendChild(s);
+      s.onload = resolve; s.onerror = reject;
+    };
+    document.head.appendChild(s);
+  });
+}
+
+async function loadEquityGraph(refresh = false) {
+  const el = document.getElementById("equity-chart");
+  el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;">
+    <div class="spinner"></div><div style="font-size:13px;color:var(--text-muted);">Kimi 查询中…</div></div>`;
+  document.getElementById("equity-refresh-btn").disabled = true;
+  try {
+    await _loadECharts();
+    const res = await apiFetch(`/api/companies/${currentCompanyId}/equity-graph${refresh ? "?refresh=true" : ""}`);
+    const data = await res.json();
+    document.getElementById("equity-refresh-btn").disabled = false;
+    if (data.error) {
+      el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--text-muted);">
+        <div style="font-size:36px;">🔍</div><div style="font-size:13px;">${escHtml(data.error)}</div></div>`;
+      return;
+    }
+    _renderEquityChart(el, data);
+  } catch (e) {
+    document.getElementById("equity-refresh-btn").disabled = false;
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败，请点刷新重试</div>`;
+  }
+}
+
+function _renderEquityChart(container, data) {
+  if (_equityChart) { try { _equityChart.dispose(); } catch (_) {} }
+  _equityChart = echarts.init(container, null, { renderer: "svg" });
+
+  const TYPE_COLOR = { target: "#2563eb", company: "#0891b2", person: "#d97706", state: "#7c3aed" };
+
+  function processNode(node, depth) {
+    const color = TYPE_COLOR[node.type] || "#64748b";
+    const name = node.name || "";
+    const short = name.length > 9 ? name.slice(0, 8) + "…" : name;
+    return {
+      name: node.name,
+      value: node.value || "",
+      type: node.type,
+      symbolSize: depth === 0 ? [150, 48] : [130, 42],
+      itemStyle: { color, borderColor: "transparent", borderRadius: 8, shadowBlur: depth === 0 ? 12 : 4, shadowColor: color + "55" },
+      label: {
+        position: "inside",
+        formatter: node.value ? `{n|${short}}\n{p|${node.value}}` : `{n|${short}}`,
+        rich: {
+          n: { fontSize: depth === 0 ? 12 : 11, color: "#fff", fontWeight: "600", lineHeight: depth === 0 ? 20 : 18 },
+          p: { fontSize: 10, color: "rgba(255,255,255,0.88)", lineHeight: 15 },
+        },
+      },
+      children: (node.children || []).map(c => processNode(c, depth + 1)),
+    };
+  }
+
+  _equityChart.setOption({
+    backgroundColor: "transparent",
+    tooltip: {
+      trigger: "item",
+      formatter: p => `<b>${p.data.name}</b>${p.data.value ? "<br>持股比例：" + p.data.value : ""}`,
+    },
+    series: [{
+      type: "tree",
+      data: [processNode(data, 0)],
+      top: "20px", left: "20px", right: "20px", bottom: "20px",
+      layout: "orthogonal",
+      orient: "TB",
+      roam: true,
+      expandAndCollapse: false,
+      edgeShape: "polyline",
+      lineStyle: { color: "#cbd5e1", width: 1.5, curveness: 0 },
+      emphasis: { focus: "ancestor" },
+    }],
+  });
+
+  const ro = new ResizeObserver(() => _equityChart && _equityChart.resize());
+  ro.observe(container);
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
