@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "56";
+const CLIENT_VERSION = "57";
 
 async function checkVersion() {
   try {
@@ -2363,20 +2363,103 @@ function _renderEquityChart(container, data) {
     </div>`;
   });
 
-  container.style.overflow = 'auto';
+  container.style.overflow = 'hidden';
   container.style.padding = '0';
+  container.style.touchAction = 'none';
   if (!shareholders.length && !investments.length) {
     container.innerHTML = `<div style="text-align:center;color:#94a3b8;font-size:12px;padding:40px 0;">暂无股东/投资数据</div>`;
     return;
   }
-  container.innerHTML = `<div style="padding:16px;display:inline-block;min-width:100%;box-sizing:border-box;">
-    <div style="position:relative;width:${W}px;height:${H}px;margin:0 auto;">
-      <svg style="position:absolute;top:0;left:0;pointer-events:none;" width="${W}" height="${H}">
-        ${svgPaths}
-      </svg>
-      ${nodesHtml}
-    </div>
+  container.innerHTML = `<div id="_eq_wrap" style="position:relative;width:${W}px;height:${H}px;transform-origin:0 0;will-change:transform;">
+    <svg style="position:absolute;top:0;left:0;pointer-events:none;" width="${W}" height="${H}">
+      ${svgPaths}
+    </svg>
+    ${nodesHtml}
   </div>`;
+
+  const wrap = container.querySelector('#_eq_wrap');
+  const cw = container.clientWidth || 360;
+  const ch = container.clientHeight || 400;
+  let scale = Math.min(1, (cw - 32) / W, (ch - 32) / H);
+  let tx = (cw - W * scale) / 2;
+  let ty = Math.max(16, (ch - H * scale) / 2);
+
+  function applyT() {
+    wrap.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+  }
+  applyT();
+
+  // ── desktop: re-enable overflow scroll ──
+  if (window.matchMedia('(min-width:900px)').matches) {
+    container.style.overflow = 'auto';
+    container.style.touchAction = '';
+    wrap.style.transform = '';
+    wrap.style.margin = '16px auto';
+    return;
+  }
+
+  // ── touch: pan + pinch zoom ──
+  let t0 = null, startTx = 0, startTy = 0;
+  let startDist = 0, startScale = 1, pinchOriginX = 0, pinchOriginY = 0;
+  let lastTap = 0;
+
+  container.addEventListener('touchstart', e => {
+    e.preventDefault();
+    startTx = tx; startTy = ty;
+    if (e.touches.length === 1) {
+      t0 = { x: e.touches[0].clientX, y: e.touches[0].clientY, n: 1 };
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      startDist = Math.hypot(dx, dy);
+      startScale = scale;
+      const rect = container.getBoundingClientRect();
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+      const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+      pinchOriginX = (mx - tx) / scale;
+      pinchOriginY = (my - ty) / scale;
+      t0 = { x: mx, y: my, n: 2 };
+    }
+  }, { passive: false });
+
+  container.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (!t0) return;
+    const rect = container.getBoundingClientRect();
+    if (e.touches.length === 1 && t0.n === 1) {
+      tx = startTx + e.touches[0].clientX - t0.x;
+      ty = startTy + e.touches[0].clientY - t0.y;
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const newScale = Math.min(4, Math.max(0.3, startScale * Math.hypot(dx, dy) / startDist));
+      const mx = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left;
+      const my = (e.touches[0].clientY + e.touches[1].clientY) / 2 - rect.top;
+      tx = mx - pinchOriginX * newScale;
+      ty = my - pinchOriginY * newScale;
+      scale = newScale;
+    }
+    applyT();
+  }, { passive: false });
+
+  container.addEventListener('touchend', e => {
+    if (e.touches.length === 0) {
+      // double-tap to reset
+      const now = Date.now();
+      if (now - lastTap < 280) {
+        scale = Math.min(1, (cw - 32) / W, (ch - 32) / H);
+        tx = (cw - W * scale) / 2;
+        ty = Math.max(16, (ch - H * scale) / 2);
+        applyT();
+      }
+      lastTap = now;
+      t0 = null;
+    } else if (e.touches.length === 1) {
+      // transition from pinch to single-finger pan
+      startTx = tx; startTy = ty;
+      t0 = { x: e.touches[0].clientX, y: e.touches[0].clientY, n: 1 };
+    }
+  }, { passive: false });
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
