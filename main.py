@@ -46,7 +46,7 @@ async def no_cache_html(request: Request, call_next):
 async def auth_middleware(request: Request, call_next):
     if not ACCESS_PASSWORD:
         return await call_next(request)
-    if request.url.path.startswith("/api/") and request.url.path not in ("/api/auth", "/api/version") and not request.url.path.startswith("/api/calendar"):
+    if request.url.path.startswith("/api/") and request.url.path not in ("/api/auth", "/api/version") and not request.url.path.startswith("/api/calendar") and not request.url.path.startswith("/api/admin/"):
         if request.headers.get("X-Access-Token", "") != ACCESS_PASSWORD:
             return JSONResponse(status_code=401, content={"detail": "未授权"})
     return await call_next(request)
@@ -57,6 +57,68 @@ APP_VERSION = "40"
 @app.get("/api/version")
 async def get_version():
     return {"version": APP_VERSION}
+
+
+# ── Admin ─────────────────────────────────────────────────────────────────────
+
+@app.get("/api/admin/export-db")
+async def export_db(token: str = ""):
+    if ACCESS_PASSWORD and token != ACCESS_PASSWORD:
+        raise HTTPException(status_code=401, detail="未授权")
+    return FileResponse("client_manager.db", media_type="application/octet-stream", filename="client_manager.db")
+
+
+@app.post("/api/admin/import-db")
+async def import_db(request: Request, file: UploadFile = File(...)):
+    if ACCESS_PASSWORD and request.headers.get("X-Access-Token", "") != ACCESS_PASSWORD:
+        raise HTTPException(status_code=401, detail="未授权")
+    content = await file.read()
+    if len(content) < 100 or content[:6] != b"SQLite":
+        raise HTTPException(status_code=400, detail="不是有效的 SQLite 文件")
+    db_path = Path("client_manager.db")
+    shutil.copy2(db_path, "client_manager.db.bak")
+    with open(db_path, "wb") as f:
+        f.write(content)
+    import threading, sys
+    def _restart():
+        import time
+        time.sleep(1)
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    threading.Thread(target=_restart, daemon=True).start()
+    return {"ok": True, "message": "数据库已替换，服务正在重启"}
+
+
+@app.get("/admin/import")
+async def admin_import_page(token: str = ""):
+    if ACCESS_PASSWORD and token != ACCESS_PASSWORD:
+        raise HTTPException(status_code=401, detail="未授权")
+    from fastapi.responses import HTMLResponse
+    html = f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>导入数据库</title>
+<style>body{{font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 20px}}
+h2{{color:#333}}input[type=file]{{display:block;margin:16px 0}}
+button{{background:#2563eb;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:16px;cursor:pointer}}
+#msg{{margin-top:16px;color:green}}.err{{color:red!important}}</style></head>
+<body><h2>导入数据库</h2>
+<p>选择本地下载的 <code>client_manager.db</code> 文件，上传后服务自动重启。</p>
+<input type="file" id="f" accept=".db">
+<button onclick="upload()">上传并替换</button>
+<div id="msg"></div>
+<script>
+async function upload(){{
+  const f=document.getElementById('f').files[0];
+  if(!f){{alert('请先选择文件');return;}}
+  const fd=new FormData();fd.append('file',f);
+  document.getElementById('msg').textContent='上传中…';
+  const r=await fetch('/api/admin/import-db',{{method:'POST',headers:{{'X-Access-Token':'{token}'}},body:fd}});
+  const d=await r.json();
+  const m=document.getElementById('msg');
+  if(r.ok){{m.textContent=d.message+'（10秒后刷新主页面）';}}
+  else{{m.textContent=d.detail;m.className='err';}}
+}}
+</script></body></html>"""
+    return HTMLResponse(html)
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
