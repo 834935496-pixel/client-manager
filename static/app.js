@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "57";
+const CLIENT_VERSION = "58";
 
 async function checkVersion() {
   try {
@@ -295,7 +295,7 @@ async function switchTab(tab) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
   document.querySelectorAll("[id^='tab-']").forEach((t) => (t.style.display = "none"));
   document.querySelector(`.tab[onclick="switchTab('${tab}')"]`).classList.add("active");
-  document.getElementById(`tab-${tab}`).style.display = "block";
+  document.getElementById(`tab-${tab}`).style.display = tab === "equity" ? "flex" : "block";
   currentTab = tab;
   if (tab === "info") loadContacts();
   if (tab === "products") renderProducts();

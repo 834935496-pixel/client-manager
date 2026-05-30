@@ -24,15 +24,17 @@ body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; 
 #page-ai.active { display: flex; }
 .page-content { padding: 16px 16px calc(var(--nav-h) + 16px); }
 
-/* Mobile: detail & companies inner tabs need bottom padding */
-#page-detail .tabs { padding: 0 16px; }
-#page-detail #tab-info,
-#page-detail #tab-products,
-#page-detail #tab-interactions,
-#page-detail #tab-todos,
-#page-detail #tab-docs,
-#page-detail #tab-finance,
-#page-detail #tab-equity { padding: 16px 16px calc(var(--nav-h) + 16px); }
+/* Detail page: full-height flex column */
+#page-detail.active { display: flex !important; flex-direction: column; height: 100svh; overflow: hidden; }
+#page-detail .header { flex-shrink: 0; }
+#page-detail .tabs   { flex-shrink: 0; padding: 0 16px; }
+
+/* All tab panels: fill remaining height, scrollable */
+#page-detail [id^="tab-"] { flex: 1; overflow-y: auto; min-height: 0; padding: 16px 16px calc(var(--nav-h) + 16px); }
+
+/* Equity tab: flex column so chart stretches */
+#tab-equity { flex-direction: column; padding: 12px 12px calc(var(--nav-h) + 8px) !important; gap: 10px; }
+#equity-chart { flex: 1; min-height: 0; }
 
 /* ── Header ── */
 .header { background: var(--primary); color: #fff; padding: 16px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
@@ -366,15 +368,9 @@ body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; 
   #page-companies .search-box { padding: 14px 32px; }
   #page-companies #companies-list .card { margin-left: 32px; margin-right: 32px; }
 
-  #page-detail { padding: 0; overflow: hidden; }
-  #page-detail .tabs { padding: 0 32px; margin-bottom: 0; flex-shrink: 0; }
-  #page-detail #tab-info,
-  #page-detail #tab-products,
-  #page-detail #tab-interactions,
-  #page-detail #tab-todos,
-  #page-detail #tab-docs,
-  #page-detail #tab-finance,
-  #page-detail #tab-equity { padding: 24px 32px; flex: 1; overflow-y: auto; min-height: 0; }
+  #page-detail { padding: 0; overflow: hidden; height: 100vh !important; }
+  #page-detail .tabs { padding: 0 32px; margin-bottom: 0; }
+  #page-detail [id^="tab-"] { padding: 24px 32px; }
 
   .page-content { padding: 24px 32px; flex: 1; overflow-y: auto; }
 
@@ -382,8 +378,9 @@ body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; 
   #page-companies #companies-list { padding: 0; }
   #page-companies .client-item { padding: 16px 32px; }
 
-  /* Equity chart taller on desktop */
-  #equity-chart { min-height: 560px !important; height: calc(100vh - 260px) !important; }
+  /* Equity chart fills remaining space on desktop */
+  #tab-equity { padding: 16px 32px 24px !important; }
+  #equity-chart { flex: 1; min-height: 0; height: auto !important; }
 
   /* AI page */
   #page-ai .chat-messages { padding: 20px 32px 160px; }
