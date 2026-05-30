@@ -1881,7 +1881,7 @@ _SHEET_GENERIC_RULES = [
 ]
 
 
-def _classify_sheet(sheet_name: str) -> Optional[str]:
+def _classify_sheet(sheet_name: str, rows: list = None) -> Optional[str]:
     name = sheet_name.strip()
     for key, kws in _SHEET_TYPE_RULES:
         if any(kw in name for kw in kws):
@@ -1889,6 +1889,15 @@ def _classify_sheet(sheet_name: str) -> Optional[str]:
     for key, kws in _SHEET_GENERIC_RULES:
         if any(kw in name for kw in kws):
             return key
+    # 名称匹配不到时，扫描前30行单元格内容判断类型
+    if rows:
+        text = " ".join(str(c or "") for row in rows[:30] for c in row)
+        if "经营活动" in text and "现金流" in text:
+            return "cash_flow_consolidated"
+        if "货币资金" in text or "资产负债" in text or ("资产" in text and "负债" in text and "权益" in text):
+            return "balance_sheet"
+        if "营业收入" in text or "净利润" in text or "利润总额" in text:
+            return "income"
     return None
 
 
@@ -1908,7 +1917,7 @@ def _extract_excel(file_path: Path) -> dict:
     print(f"Excel sheets: {list(sheets.keys())}")
     assigned = set()
     for sheet_name, rows in sheets.items():
-        key = _classify_sheet(sheet_name)
+        key = _classify_sheet(sheet_name, rows)
         print(f"  sheet '{sheet_name}' → {key}")
         if key is None or key in assigned:
             continue
