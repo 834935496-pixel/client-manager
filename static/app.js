@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "41";
+const CLIENT_VERSION = "42";
 
 async function checkVersion() {
   try {
