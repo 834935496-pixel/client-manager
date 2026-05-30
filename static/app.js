@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "50";
+const CLIENT_VERSION = "51";
 
 async function checkVersion() {
   try {
@@ -303,7 +303,7 @@ async function switchTab(tab) {
   if (tab === "todos") loadCompanyTodos();
   if (tab === "docs") loadDocuments();
   if (tab === "finance") loadFinancials();
-  if (tab === "equity") loadEquityGraph();
+  if (tab === "equity") loadEquityTab();
 }
 
 const PRODUCT_COLORS = { "资产类": "#e8f0fe", "负债类": "#e6f4ea", "中间业务": "#fff3e0" };
@@ -2192,6 +2192,55 @@ function deleteFinancials() {
 }
 
 // ── 股权图谱 ──────────────────────────────────────────────────────────────────
+
+async function uploadEquityImage(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const btn = document.getElementById("equity-upload-btn");
+  _btnSpin(btn, "上传中…");
+  const fd = new FormData();
+  fd.append("file", file);
+  try {
+    const r = await fetch(`/api/companies/${currentCompanyId}/equity-image`, {
+      method: "POST", headers: { "X-Access-Token": token }, body: fd,
+    });
+    const d = await r.json();
+    _btnReset(btn, "📷 上传截图");
+    input.value = "";
+    if (d.url) _showEquityImage(d.url);
+  } catch (e) {
+    _btnReset(btn, "📷 上传截图");
+    alert("上传失败，请重试");
+  }
+}
+
+function _showEquityImage(url) {
+  const el = document.getElementById("equity-chart");
+  el.innerHTML = `
+    <div style="position:relative;">
+      <img src="${url}?t=${Date.now()}" style="width:100%;border-radius:12px;display:block;"
+        onclick="this.style.transform=this.style.transform?'':'scale(1.8)';this.style.transition='transform .3s';this.style.zIndex='10';this.style.position='relative'">
+      <button onclick="deleteEquityImage()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,.5);
+        color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;">🗑 删除</button>
+    </div>`;
+}
+
+async function deleteEquityImage() {
+  if (!confirm("删除截图？")) return;
+  await apiFetch(`/api/companies/${currentCompanyId}/equity-image`, { method: "DELETE" });
+  loadEquityTab();
+}
+
+async function loadEquityTab() {
+  const el = document.getElementById("equity-chart");
+  const res = await apiFetch(`/api/companies/${currentCompanyId}/equity-image-url`);
+  const { url } = await res.json();
+  if (url) { _showEquityImage(url); return; }
+  el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:12px;color:var(--text-muted);">
+    <div style="font-size:40px;">📊</div>
+    <div style="font-size:13px;text-align:center;">从企查查/天眼查截图上传<br>或点「AI生成」自动查询</div>
+  </div>`;
+}
 
 async function loadEquityGraph(refresh = false) {
   const el = document.getElementById("equity-chart");

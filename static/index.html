@@ -127,17 +127,13 @@
 
     <!-- 股权图谱 -->
     <div id="tab-equity" style="display:none;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-        <div style="font-size:11px;color:#d97706;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:3px 8px;">⚠️ AI生成，请以工商官方信息为准</div>
-        <button class="btn btn-outline btn-sm" onclick="loadEquityGraph(true)" id="equity-refresh-btn">🔄 刷新</button>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <div style="flex:1;font-size:11px;color:#64748b;">股权结构图</div>
+        <input type="file" id="equity-img-input" accept="image/*" style="display:none" onchange="uploadEquityImage(this)">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('equity-img-input').click()" id="equity-upload-btn">📷 上传截图</button>
+        <button class="btn btn-outline btn-sm" onclick="loadEquityGraph(true)" id="equity-refresh-btn">🤖 AI生成</button>
       </div>
-      <div id="equity-chart" style="width:100%;height:calc(100vh - 240px);min-height:380px;border-radius:12px;overflow:hidden;background:#f8fafc;"></div>
-      <div id="equity-legend" style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px;font-size:11px;color:var(--text-muted);">
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#2563eb;margin-right:3px;"></span>目标企业</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#0891b2;margin-right:3px;"></span>企业股东</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#d97706;margin-right:3px;"></span>自然人</span>
-        <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#7c3aed;margin-right:3px;"></span>国有/国资</span>
-      </div>
+      <div id="equity-chart" style="width:100%;min-height:380px;border-radius:12px;overflow:hidden;background:#f8fafc;"></div>
     </div>
 
     <!-- 财务状况 -->

@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "50"
+APP_VERSION = "51"
 
 @app.get("/api/version")
 async def get_version():
@@ -276,6 +276,43 @@ class ProductBody(BaseModel):
     start_date: str = ""
     end_date: str = ""
     notes: str = ""
+
+@app.post("/api/companies/{company_id}/equity-image")
+async def upload_equity_image(company_id: int, file: UploadFile = File(...)):
+    conn = get_db()
+    if not conn.execute("SELECT id FROM companies WHERE id=?", (company_id,)).fetchone():
+        raise HTTPException(status_code=404)
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
+    if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
+        ext = "jpg"
+    dest = Path("uploads") / f"equity_{company_id}.{ext}"
+    # 删除旧文件
+    for old in Path("uploads").glob(f"equity_{company_id}.*"):
+        old.unlink(missing_ok=True)
+    content = await file.read()
+    dest.write_bytes(content)
+    conn.execute("UPDATE companies SET equity_data=NULL WHERE id=?", (company_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "url": f"/uploads/equity_{company_id}.{ext}"}
+
+
+@app.get("/api/companies/{company_id}/equity-image-url")
+def get_equity_image_url(company_id: int):
+    for ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        p = Path("uploads") / f"equity_{company_id}.{ext}"
+        if p.exists():
+            return {"url": f"/uploads/equity_{company_id}.{ext}"}
+    return {"url": None}
+
+
+@app.delete("/api/companies/{company_id}/equity-image")
+def delete_equity_image(company_id: int):
+    for ext in ("jpg", "jpeg", "png", "webp", "gif"):
+        p = Path("uploads") / f"equity_{company_id}.{ext}"
+        p.unlink(missing_ok=True)
+    return {"ok": True}
+
 
 @app.get("/api/companies/{company_id}/equity-graph")
 async def get_equity_graph(company_id: int, refresh: bool = False):
