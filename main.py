@@ -79,13 +79,35 @@ async def import_db(request: Request, file: UploadFile = File(...)):
     shutil.copy2(db_path, "client_manager.db.bak")
     with open(db_path, "wb") as f:
         f.write(content)
-    import threading, sys
+    import threading
     def _restart():
         import time
         time.sleep(1)
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+        os._exit(0)
     threading.Thread(target=_restart, daemon=True).start()
     return {"ok": True, "message": "数据库已替换，服务正在重启"}
+
+
+@app.post("/api/admin/deploy")
+async def deploy_webhook(token: str = ""):
+    if ACCESS_PASSWORD and token != ACCESS_PASSWORD:
+        raise HTTPException(status_code=401, detail="未授权")
+    import subprocess
+    result = subprocess.run(
+        ["git", "pull", "origin", "main"],
+        capture_output=True, text=True,
+        cwd=str(Path(__file__).parent)
+    )
+    output = result.stdout + result.stderr
+    if result.returncode != 0:
+        return {"ok": False, "output": output}
+    import threading
+    def _restart():
+        import time
+        time.sleep(1)
+        os._exit(0)
+    threading.Thread(target=_restart, daemon=True).start()
+    return {"ok": True, "output": output}
 
 
 @app.get("/admin/import")
