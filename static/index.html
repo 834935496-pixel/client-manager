@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1a3a6b">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-title" content="客户档案">
-<link rel="stylesheet" href="style.css?v=15">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 <div id="app">
@@ -40,14 +40,16 @@
       <button class="icon-btn" onclick="showPushModal()" title="推送提醒">🔔</button>
       <button class="icon-btn" onclick="showCalendarModal()" title="订阅日历">📅</button>
     </div>
-    <div class="section-title">今日及逾期待办</div>
-    <div class="card">
-      <div class="card-body" id="today-todos"><div class="loading"><div class="spinner"></div></div></div>
+    <div class="page-content">
+      <div class="section-title">今日及逾期待办</div>
+      <div class="card">
+        <div class="card-body" id="today-todos"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
     </div>
   </div>
 
   <!-- ── 企业列表页 ── -->
-  <div id="page-companies" class="page" style="padding:0 0 calc(var(--nav-h) + 16px);">
+  <div id="page-companies" class="page" style="padding:0;">
     <div class="header">
       <div><h1>客户档案</h1></div>
       <div class="header-actions">
@@ -59,7 +61,7 @@
       <input type="search" class="search-input" id="company-search" placeholder="搜索企业名称..." oninput="searchCompanies(this.value)">
     </div>
     <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="handlePdfUpload(this)">
-    <div id="companies-list"></div>
+    <div id="companies-list" style="flex:1;overflow-y:auto;"></div>
   </div>
 
   <!-- ── 企业详情页 ── -->

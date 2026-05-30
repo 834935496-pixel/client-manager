@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "55";
+const CLIENT_VERSION = "56";
 
 async function checkVersion() {
   try {
@@ -2219,26 +2219,13 @@ async function uploadEquityImage(input) {
 
 function _showEquityResult(url, data) {
   const el = document.getElementById("equity-chart");
-  const ts = Date.now();
-  const imgHtml = url ? `
-    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
-      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
-        <span>原始截图</span>
-        <button onclick="deleteEquityImage()" style="background:none;border:none;color:#ef4444;font-size:11px;cursor:pointer;">🗑 删除</button>
-      </div>
-      <img src="${url}?t=${ts}" style="width:100%;border-radius:8px;display:block;">
-    </div>` : "";
-
   if (data && !data.error) {
-    el.innerHTML = `<div style="padding:16px;overflow-y:auto;height:100%;box-sizing:border-box;" id="equity-inner"></div>`;
+    el.innerHTML = `<div style="padding:0;overflow:auto;height:100%;box-sizing:border-box;" id="equity-inner"></div>`;
     _renderEquityChart(document.getElementById("equity-inner"), data);
-    document.getElementById("equity-inner").insertAdjacentHTML("beforeend", imgHtml);
   } else {
-    // AI识别失败，只展示原图
-    el.innerHTML = `<div style="padding:16px;">
-      ${data?.error ? `<div style="font-size:12px;color:#d97706;margin-bottom:10px;">⚠️ ${escHtml(data.error)}</div>` : ""}
-      ${url ? `<img src="${url}?t=${ts}" style="width:100%;border-radius:8px;">
-        <button onclick="deleteEquityImage()" style="margin-top:8px;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:12px;color:#ef4444;cursor:pointer;width:100%;">🗑 删除截图</button>` : ""}
+    el.innerHTML = `<div style="padding:16px;text-align:center;">
+      ${data?.error ? `<div style="font-size:13px;color:#d97706;padding:20px;">⚠️ ${escHtml(data.error)}</div>` : ""}
+      ${!data?.error ? `<div style="color:var(--text-muted);padding:40px 0;font-size:13px;">AI识别失败，请重新上传截图</div>` : ""}
     </div>`;
   }
 }
