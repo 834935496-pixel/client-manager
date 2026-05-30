@@ -67,6 +67,8 @@ async function checkVersion() {
     const res = await fetch("/api/version");
     if (!res.ok) return;
     const data = await res.json();
+    const vEl = document.getElementById("app-version");
+    if (vEl && data.version) vEl.textContent = `v${data.version}`;
     if (data.version && data.version !== CLIENT_VERSION) {
       if (sessionStorage.getItem("sv") === data.version) return;
       sessionStorage.setItem("sv", data.version);
