@@ -1902,15 +1902,29 @@ def _extract_excel(file_path: Path) -> dict:
 
     result = {k: [] for k in _TMPL_MAP}
     result["unit"] = "万元"
+    result["year"] = None
+    result["prev_year"] = None
 
     assigned = set()
     for sheet_name, rows in sheets.items():
         key = _classify_sheet(sheet_name)
         if key is None or key in assigned:
             continue
-        items, unit, _y, _py = _parse_fin_sheet(rows)
+        items, unit, year_cur, year_prev = _parse_fin_sheet(rows)
         if not items:
             continue
+
+        # 取第一个识别到年份的 sheet 作为年份
+        if result["year"] is None and year_cur:
+            try:
+                result["year"] = int(year_cur)
+            except Exception:
+                pass
+        if result["prev_year"] is None and year_prev:
+            try:
+                result["prev_year"] = int(year_prev)
+            except Exception:
+                pass
 
         def _to_wan(v, u):
             if v is None:
@@ -1932,7 +1946,7 @@ def _extract_excel(file_path: Path) -> dict:
         ]
         result[key].extend(converted)
         assigned.add(key)
-        print(f"Excel sheet '{sheet_name}' → {key}: {len(converted)} rows")
+        print(f"Excel sheet '{sheet_name}' → {key}: {len(converted)} rows, year={year_cur}")
 
     # Map raw items to standard templates
     for key, tmpl in _TMPL_MAP.items():
