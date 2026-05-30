@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "51"
+APP_VERSION = "52"
 
 @app.get("/api/version")
 async def get_version():
@@ -2309,6 +2309,7 @@ def calendar_todos(token: str = ""):
 
 # ── Static ────────────────────────────────────────────────────────────────────
 
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 
