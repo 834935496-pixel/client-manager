@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "43";
+const CLIENT_VERSION = "44";
 
 async function checkVersion() {
   try {
@@ -2199,13 +2199,9 @@ function _loadECharts() {
   if (window.echarts) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "https://cdn.bootcdn.net/ajax/libs/echarts/5.4.3/echarts.min.js";
+    s.src = "/echarts.min.js";
     s.onload = resolve;
-    s.onerror = () => {
-      s.src = "https://cdn.staticfile.org/echarts/5.4.3/echarts.min.js";
-      document.head.appendChild(s);
-      s.onload = resolve; s.onerror = reject;
-    };
+    s.onerror = reject;
     document.head.appendChild(s);
   });
 }

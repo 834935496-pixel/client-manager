@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "43"
+APP_VERSION = "44"
 
 @app.get("/api/version")
 async def get_version():
