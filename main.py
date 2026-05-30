@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "52"
+APP_VERSION = "53"
 
 @app.get("/api/version")
 async def get_version():
@@ -279,31 +279,89 @@ class ProductBody(BaseModel):
 
 @app.post("/api/companies/{company_id}/equity-image")
 async def upload_equity_image(company_id: int, file: UploadFile = File(...)):
+    import base64, httpx as _httpx
     conn = get_db()
-    if not conn.execute("SELECT id FROM companies WHERE id=?", (company_id,)).fetchone():
+    row = conn.execute("SELECT name FROM companies WHERE id=?", (company_id,)).fetchone()
+    if not row:
         raise HTTPException(status_code=404)
+    company_name = row["name"]
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "jpg"
     if ext not in ("jpg", "jpeg", "png", "webp", "gif"):
         ext = "jpg"
     dest = Path("uploads") / f"equity_{company_id}.{ext}"
-    # 删除旧文件
     for old in Path("uploads").glob(f"equity_{company_id}.*"):
         old.unlink(missing_ok=True)
     content = await file.read()
     dest.write_bytes(content)
-    conn.execute("UPDATE companies SET equity_data=NULL WHERE id=?", (company_id,))
+
+    # 视觉模型识别股权结构
+    equity_data = None
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "").rstrip("/")
+    if api_key and "moonshot" in base_url:
+        img_b64 = base64.b64encode(content).decode()
+        mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+        prompt = f"""这是「{company_name}」的股权结构图截图。请从图中准确提取股权关系，严格按以下JSON格式返回，不加说明和代码块：
+{{
+  "name": "{company_name}",
+  "type": "target",
+  "shareholders": [
+    {{
+      "name": "直接股东全称",
+      "type": "company|person|state",
+      "value": "持股比例如51.00%",
+      "shareholders": [
+        {{"name": "上层股东", "type": "person", "value": "80.00%", "shareholders": []}}
+      ]
+    }}
+  ],
+  "investments": [
+    {{
+      "name": "子公司全称",
+      "type": "company",
+      "value": "100%",
+      "investments": [
+        {{"name": "孙公司", "type": "company", "value": "51%", "investments": []}}
+      ]
+    }}
+  ]
+}}
+只提取图中明确显示的信息，不要补充或推测。type取值：company/person/state。"""
+        vision_url = (base_url if base_url.endswith("/v1") else base_url + "/v1") + "/chat/completions"
+        try:
+            async with _httpx.AsyncClient(timeout=45) as hc:
+                r = await hc.post(vision_url,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json={"model": "moonshot-v1-8k-vision-preview",
+                          "messages": [{"role": "user", "content": [
+                              {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{img_b64}"}},
+                              {"type": "text", "text": prompt}
+                          ]}],
+                          "max_tokens": 3000})
+            r.raise_for_status()
+            raw = r.json()["choices"][0]["message"]["content"].strip()
+            raw = raw.replace("```json", "").replace("```", "").strip()
+            equity_data = json.loads(raw)
+        except Exception:
+            equity_data = None
+
+    conn.execute("UPDATE companies SET equity_data=? WHERE id=?",
+                 (json.dumps(equity_data, ensure_ascii=False) if equity_data else None, company_id))
     conn.commit()
     conn.close()
-    return {"ok": True, "url": f"/uploads/equity_{company_id}.{ext}"}
+    return {"ok": True, "url": f"/uploads/equity_{company_id}.{ext}", "data": equity_data}
 
 
 @app.get("/api/companies/{company_id}/equity-image-url")
 def get_equity_image_url(company_id: int):
+    conn = get_db()
+    row = conn.execute("SELECT equity_data FROM companies WHERE id=?", (company_id,)).fetchone()
+    equity_data = json.loads(row["equity_data"]) if row and row["equity_data"] else None
     for ext in ("jpg", "jpeg", "png", "webp", "gif"):
         p = Path("uploads") / f"equity_{company_id}.{ext}"
         if p.exists():
-            return {"url": f"/uploads/equity_{company_id}.{ext}"}
-    return {"url": None}
+            return {"url": f"/uploads/equity_{company_id}.{ext}", "data": equity_data}
+    return {"url": None, "data": equity_data}
 
 
 @app.delete("/api/companies/{company_id}/equity-image")

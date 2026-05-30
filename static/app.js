@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "51";
+const CLIENT_VERSION = "53";
 
 async function checkVersion() {
   try {
@@ -2197,7 +2197,10 @@ async function uploadEquityImage(input) {
   const file = input.files[0];
   if (!file) return;
   const btn = document.getElementById("equity-upload-btn");
-  _btnSpin(btn, "上传中…");
+  const el = document.getElementById("equity-chart");
+  _btnSpin(btn, "识别中…");
+  el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:12px;">
+    <div class="spinner"></div><div style="font-size:13px;color:var(--text-muted);">AI 识别股权结构中…</div></div>`;
   const fd = new FormData();
   fd.append("file", file);
   try {
@@ -2207,22 +2210,37 @@ async function uploadEquityImage(input) {
     const d = await r.json();
     _btnReset(btn, "📷 上传截图");
     input.value = "";
-    if (d.url) _showEquityImage(d.url);
+    _showEquityResult(d.url, d.data);
   } catch (e) {
     _btnReset(btn, "📷 上传截图");
-    alert("上传失败，请重试");
+    el.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-muted);">上传失败，请重试</div>`;
   }
 }
 
-function _showEquityImage(url) {
+function _showEquityResult(url, data) {
   const el = document.getElementById("equity-chart");
-  el.innerHTML = `
-    <div style="position:relative;">
-      <img src="${url}?t=${Date.now()}" style="width:100%;border-radius:12px;display:block;"
-        onclick="this.style.transform=this.style.transform?'':'scale(1.8)';this.style.transition='transform .3s';this.style.zIndex='10';this.style.position='relative'">
-      <button onclick="deleteEquityImage()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,.5);
-        color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;">🗑 删除</button>
+  const ts = Date.now();
+  const imgHtml = url ? `
+    <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px;">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+        <span>原始截图</span>
+        <button onclick="deleteEquityImage()" style="background:none;border:none;color:#ef4444;font-size:11px;cursor:pointer;">🗑 删除</button>
+      </div>
+      <img src="${url}?t=${ts}" style="width:100%;border-radius:8px;display:block;">
+    </div>` : "";
+
+  if (data && !data.error) {
+    el.innerHTML = `<div style="padding:16px;overflow-y:auto;height:100%;box-sizing:border-box;" id="equity-inner"></div>`;
+    _renderEquityChart(document.getElementById("equity-inner"), data);
+    document.getElementById("equity-inner").insertAdjacentHTML("beforeend", imgHtml);
+  } else {
+    // AI识别失败，只展示原图
+    el.innerHTML = `<div style="padding:16px;">
+      ${data?.error ? `<div style="font-size:12px;color:#d97706;margin-bottom:10px;">⚠️ ${escHtml(data.error)}</div>` : ""}
+      ${url ? `<img src="${url}?t=${ts}" style="width:100%;border-radius:8px;">
+        <button onclick="deleteEquityImage()" style="margin-top:8px;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:12px;color:#ef4444;cursor:pointer;width:100%;">🗑 删除截图</button>` : ""}
     </div>`;
+  }
 }
 
 async function deleteEquityImage() {
@@ -2233,34 +2251,17 @@ async function deleteEquityImage() {
 
 async function loadEquityTab() {
   const el = document.getElementById("equity-chart");
-  const res = await apiFetch(`/api/companies/${currentCompanyId}/equity-image-url`);
-  const { url } = await res.json();
-  if (url) { _showEquityImage(url); return; }
+  el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;min-height:200px;">
+    <div class="spinner"></div></div>`;
+  try {
+    const res = await apiFetch(`/api/companies/${currentCompanyId}/equity-image-url`);
+    const { url, data } = await res.json();
+    if (url || data) { _showEquityResult(url, data); return; }
+  } catch (_) {}
   el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;gap:12px;color:var(--text-muted);">
     <div style="font-size:40px;">📊</div>
-    <div style="font-size:13px;text-align:center;">从企查查/天眼查截图上传<br>或点「AI生成」自动查询</div>
+    <div style="font-size:13px;text-align:center;">上传企查查 / 天眼查股权截图<br>AI 自动识别生成结构图</div>
   </div>`;
-}
-
-async function loadEquityGraph(refresh = false) {
-  const el = document.getElementById("equity-chart");
-  el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:12px;">
-    <div class="spinner"></div><div style="font-size:13px;color:var(--text-muted);">Kimi 查询中…</div></div>`;
-  document.getElementById("equity-refresh-btn").disabled = true;
-  try {
-    const res = await apiFetch(`/api/companies/${currentCompanyId}/equity-graph${refresh ? "?refresh=true" : ""}`);
-    const data = await res.json();
-    document.getElementById("equity-refresh-btn").disabled = false;
-    if (data.error) {
-      el.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:10px;color:var(--text-muted);">
-        <div style="font-size:36px;">🔍</div><div style="font-size:13px;">${escHtml(data.error)}</div></div>`;
-      return;
-    }
-    _renderEquityChart(el, data);
-  } catch (e) {
-    document.getElementById("equity-refresh-btn").disabled = false;
-    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-muted);font-size:13px;">加载失败，请点🔄重试</div>`;
-  }
 }
 
 function _renderEquityChart(container, data) {

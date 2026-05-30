@@ -128,10 +128,9 @@
     <!-- 股权图谱 -->
     <div id="tab-equity" style="display:none;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
-        <div style="flex:1;font-size:11px;color:#64748b;">股权结构图</div>
+        <div style="flex:1;font-size:11px;color:#64748b;">上传企查查/天眼查截图，AI自动识别</div>
         <input type="file" id="equity-img-input" accept="image/*" style="display:none" onchange="uploadEquityImage(this)">
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('equity-img-input').click()" id="equity-upload-btn">📷 上传截图</button>
-        <button class="btn btn-outline btn-sm" onclick="loadEquityGraph(true)" id="equity-refresh-btn">🤖 AI生成</button>
       </div>
       <div id="equity-chart" style="width:100%;min-height:380px;border-radius:12px;overflow:hidden;background:#f8fafc;"></div>
     </div>
