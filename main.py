@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "48"
+APP_VERSION = "49"
 
 @app.get("/api/version")
 async def get_version():
@@ -324,18 +324,21 @@ async def get_equity_graph(company_id: int, refresh: bool = False):
 
 type取值：target=目标企业, company=企业, person=自然人, state=国有/国资。
 某层无数据则数组留空。若完全无法查询，返回：{{"error": "无法获取{name}的股权信息"}}"""
+    import asyncio as _aio
+    payload = {"model": "moonshot-v1-8k", "messages": [{"role": "user", "content": prompt}], "max_tokens": 3000}
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     try:
         async with httpx.AsyncClient(timeout=30) as hc:
-            r = await hc.post(api_url,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "moonshot-v1-8k", "messages": [{"role": "user", "content": prompt}], "max_tokens": 3000},
-            )
+            r = await hc.post(api_url, headers=headers, json=payload)
+            if r.status_code == 429:
+                await _aio.sleep(12)
+                r = await hc.post(api_url, headers=headers, json=payload)
         r.raise_for_status()
         raw = r.json()["choices"][0]["message"]["content"].strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         data = json.loads(raw)
     except httpx.TimeoutException:
-        data = {"error": "查询超时（30s），云端可能无法访问 Kimi API，请稍后重试"}
+        data = {"error": "查询超时（30s），请稍后重试"}
     except Exception as e:
         data = {"error": f"查询失败：{str(e)[:120]}"}
     conn.execute(
