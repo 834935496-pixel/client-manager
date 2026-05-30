@@ -1867,17 +1867,17 @@ def _parse_fin_sheet(rows: list) -> tuple:
 
 # Keywords used to identify which of the 6 statement types a sheet represents
 _SHEET_TYPE_RULES = [
-    ("cash_flow_consolidated", ["现金流量", "合并现金", "现金及现金等价物"]),
     ("cash_flow_parent",       ["母公司现金流量", "本公司现金流量"]),
-    ("balance_sheet",          ["合并资产负债", "合并负债"]),
-    ("balance_sheet_parent",   ["母公司资产负债", "本公司资产负债"]),
-    ("income",                 ["合并利润", "合并损益"]),
-    ("income_parent",          ["母公司利润", "本公司利润", "母公司损益"]),
+    ("balance_sheet_parent",   ["母公司资产负债", "本公司资产负债", "母公司资产", "本公司资产"]),
+    ("income_parent",          ["母公司利润", "本公司利润", "母公司损益", "本公司损益"]),
+    ("cash_flow_consolidated", ["合并现金流量", "现金流量表", "现金流量", "合并现金", "现金及现金等价物"]),
+    ("balance_sheet",          ["合并资产负债", "合并负债", "资产负债表", "资产负债"]),
+    ("income",                 ["合并利润", "合并损益", "利润表", "损益表", "利润", "损益"]),
 ]
 _SHEET_GENERIC_RULES = [
-    ("cash_flow_consolidated", ["现金流量"]),
-    ("balance_sheet",          ["资产负债"]),
-    ("income",                 ["利润", "损益"]),
+    ("cash_flow_consolidated", ["现金流", "Cash"]),
+    ("balance_sheet",          ["资产", "Balance"]),
+    ("income",                 ["收入", "Income", "P&L"]),
 ]
 
 
@@ -1905,9 +1905,11 @@ def _extract_excel(file_path: Path) -> dict:
     result["year"] = None
     result["prev_year"] = None
 
+    print(f"Excel sheets: {list(sheets.keys())}")
     assigned = set()
     for sheet_name, rows in sheets.items():
         key = _classify_sheet(sheet_name)
+        print(f"  sheet '{sheet_name}' → {key}")
         if key is None or key in assigned:
             continue
         items, unit, year_cur, year_prev = _parse_fin_sheet(rows)
