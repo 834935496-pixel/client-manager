@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "42"
+APP_VERSION = "43"
 
 @app.get("/api/version")
 async def get_version():
@@ -290,14 +290,8 @@ async def get_equity_graph(company_id: int, refresh: bool = False):
     base_url = os.getenv("DEEPSEEK_BASE_URL", "").rstrip("/")
     if not api_key or "moonshot" not in base_url:
         raise HTTPException(status_code=400, detail="需要配置 Kimi API")
-    from openai import OpenAI
-    import asyncio
-    client = OpenAI(
-        base_url=base_url + "/v1" if not base_url.endswith("/v1") else base_url,
-        api_key=api_key,
-        timeout=30.0,
-        max_retries=0,
-    )
+    import httpx
+    api_url = (base_url if base_url.endswith("/v1") else base_url + "/v1") + "/chat/completions"
     prompt = f"""你是企业工商信息专家，请查询「{name}」的股权结构。
 严格按如下JSON格式返回，不要输出任何其他内容（不要markdown代码块，不要说明文字）：
 {{
@@ -316,18 +310,17 @@ async def get_equity_graph(company_id: int, refresh: bool = False):
 规则：type只能是 target/company/person/state；value为持股比例；企业股东递归填children（最多3层）。
 若无法查询，返回：{{"error": "无法获取{name}的股权信息"}}"""
     try:
-        def _call():
-            return client.chat.completions.create(
-                model="moonshot-v1-8k",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
+        async with httpx.AsyncClient(timeout=30) as hc:
+            r = await hc.post(api_url,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": "moonshot-v1-8k", "messages": [{"role": "user", "content": prompt}], "max_tokens": 2000},
             )
-        resp = await asyncio.wait_for(asyncio.to_thread(_call), timeout=35)
-        raw = resp.choices[0].message.content.strip()
+        r.raise_for_status()
+        raw = r.json()["choices"][0]["message"]["content"].strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         data = json.loads(raw)
-    except asyncio.TimeoutError:
-        data = {"error": "查询超时，Kimi API 响应过慢，请稍后重试"}
+    except httpx.TimeoutException:
+        data = {"error": "查询超时（30s），云端可能无法访问 Kimi API，请稍后重试"}
     except Exception as e:
         data = {"error": f"查询失败：{str(e)[:120]}"}
     conn.execute(
