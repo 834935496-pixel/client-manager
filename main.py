@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "49"
+APP_VERSION = "50"
 
 @app.get("/api/version")
 async def get_version():
@@ -292,38 +292,46 @@ async def get_equity_graph(company_id: int, refresh: bool = False):
         raise HTTPException(status_code=400, detail="需要配置 Kimi API")
     import httpx
     api_url = (base_url if base_url.endswith("/v1") else base_url + "/v1") + "/chat/completions"
-    prompt = f"""你是企业工商信息专家，请查询「{name}」的完整股权图谱，需包含：
-1. 向上穿透两层：直接股东（第1层）及其股东（第2层，实控人层）；
-2. 向下穿透两层：直接对外投资/子公司（第1层）及其下属企业（第2层）。
+    prompt = f"""你是企业工商信息专家。请根据你掌握的工商登记数据，查询「{name}」的股权图谱。
 
-严格按以下JSON格式返回，不加任何说明和代码块：
+【重要原则】
+- 只填写你确实掌握、有把握的信息，不要推测或编造
+- 持股比例必须是真实的登记数据，不确定则不填（value留空字符串）
+- 股东姓名/公司名必须准确，不要用"某某公司"等模糊替代
+- 宁可信息少但准确，不要为了完整而捏造数据
+
+【查询内容】
+1. 上穿两层：直接股东（第1层）及其主要股东或实控人（第2层）
+2. 下穿两层：直接持股子公司（第1层）及其子公司（第2层）
+
+严格按以下JSON格式返回，不加说明和代码块：
 {{
-  "name": "企业全称",
+  "name": "{name}",
   "type": "target",
   "shareholders": [
     {{
-      "name": "直接股东名称",
+      "name": "直接股东全称",
       "type": "company|person|state",
       "value": "51.00%",
       "shareholders": [
-        {{"name": "实控人", "type": "person", "value": "80.00%", "shareholders": []}}
+        {{"name": "实控人全名", "type": "person", "value": "80.00%", "shareholders": []}}
       ]
     }}
   ],
   "investments": [
     {{
-      "name": "子公司名称",
+      "name": "子公司全称",
       "type": "company",
       "value": "100%",
       "investments": [
-        {{"name": "孙公司", "type": "company", "value": "51%", "investments": []}}
+        {{"name": "孙公司全称", "type": "company", "value": "51%", "investments": []}}
       ]
     }}
   ]
 }}
 
-type取值：target=目标企业, company=企业, person=自然人, state=国有/国资。
-某层无数据则数组留空。若完全无法查询，返回：{{"error": "无法获取{name}的股权信息"}}"""
+type取值：company=企业, person=自然人, state=国有/国资。
+无数据的层级数组留空 []。若完全没有可靠信息，返回：{{"error": "未找到{name}的可靠股权信息"}}"""
     import asyncio as _aio
     payload = {"model": "moonshot-v1-8k", "messages": [{"role": "user", "content": prompt}], "max_tokens": 3000}
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
