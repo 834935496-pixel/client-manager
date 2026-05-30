@@ -8,17 +8,27 @@ let chatHistory = [];
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
+function showLogin() {
+  token = "";
+  localStorage.removeItem("access_token");
+  document.getElementById("login-page").style.display = "block";
+}
+
 async function checkAuth() {
-  if (!token) {
-    const res = await fetch(`${API}/api/auth`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: "" }),
-    });
-    if (res.ok) { token = ""; init(); return; }
-    document.getElementById("login-page").style.display = "block";
-    return;
+  try {
+    if (!token) {
+      const res = await fetch(`${API}/api/auth`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: "" }),
+      });
+      if (res.ok) { token = ""; init(); return; }
+      showLogin();
+      return;
+    }
+    init();
+  } catch (_) {
+    showLogin();
   }
-  init();
 }
 
 async function doLogin() {
@@ -42,6 +52,9 @@ function apiFetch(path, opts = {}) {
   return fetch(`${API}${path}`, {
     ...opts,
     headers: { "Content-Type": "application/json", "X-Access-Token": token, ...(opts.headers || {}) },
+  }).then(res => {
+    if (res.status === 401) { showLogin(); throw new Error("401"); }
+    return res;
   });
 }
 
