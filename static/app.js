@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "47";
+const CLIENT_VERSION = "48";
 
 async function checkVersion() {
   try {
@@ -2215,47 +2215,64 @@ async function loadEquityGraph(refresh = false) {
 }
 
 function _renderEquityChart(container, data) {
-  const TYPES = {
+  const T = {
     target:  { color: "#2563eb", bg: "#eff6ff", icon: "🏢", label: "目标企业" },
-    company: { color: "#0891b2", bg: "#ecfeff", icon: "🏭", label: "企业股东" },
+    company: { color: "#0891b2", bg: "#ecfeff", icon: "🏭", label: "企业"     },
     person:  { color: "#d97706", bg: "#fffbeb", icon: "👤", label: "自然人"   },
     state:   { color: "#7c3aed", bg: "#f5f3ff", icon: "🏛",  label: "国有/国资"},
   };
 
-  function buildNode(node, depth) {
-    const t = TYPES[node.type] || TYPES.company;
-    const isRoot = depth === 0;
-    const children = node.children || [];
-    const card = `
-      <div style="background:${isRoot ? t.color : "#fff"};border:2px solid ${t.color};border-radius:12px;
-        padding:${isRoot ? "14px 16px" : "10px 14px"};box-shadow:0 2px 10px rgba(0,0,0,.08);margin-bottom:${children.length ? "0" : "0"}px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-size:18px;flex-shrink:0;">${t.icon}</span>
-          <span style="font-size:${isRoot ? "13px" : "12px"};font-weight:600;color:${isRoot ? "#fff" : "#1e293b"};
-            flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(node.name)}">${escHtml(node.name)}</span>
-          ${node.value ? `<span style="font-size:14px;font-weight:700;color:${isRoot ? "rgba(255,255,255,.9)" : t.color};
-            white-space:nowrap;flex-shrink:0;">${escHtml(node.value)}</span>` : ""}
-        </div>
-        <div style="margin-top:5px;">
-          <span style="font-size:10px;padding:2px 8px;border-radius:10px;
-            color:${isRoot ? "rgba(255,255,255,.8)" : t.color};
-            background:${isRoot ? "rgba(255,255,255,.18)" : t.bg};">${t.label}</span>
-        </div>
-      </div>`;
-
-    if (!children.length) return `<div style="margin-bottom:10px;">${card}</div>`;
-
-    return `
-      <div style="margin-bottom:12px;">
-        ${card}
-        <div style="margin-left:18px;padding-left:14px;padding-top:6px;
-          border-left:3px solid ${t.color}40;margin-top:6px;">
-          ${children.map(c => buildNode(c, depth + 1)).join("")}
-        </div>
-      </div>`;
+  function mkCard(node, isTarget) {
+    const t = T[node.type] || T.company;
+    return `<div style="background:${isTarget?t.color:"#fff"};border:2px solid ${t.color};
+      border-radius:12px;padding:${isTarget?"14px 16px":"10px 14px"};box-shadow:0 2px 10px rgba(0,0,0,.08);">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:17px;flex-shrink:0;">${t.icon}</span>
+        <span style="font-size:${isTarget?"13px":"12px"};font-weight:600;color:${isTarget?"#fff":"#1e293b"};
+          flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(node.name)}">${escHtml(node.name)}</span>
+        ${node.value?`<span style="font-size:13px;font-weight:700;white-space:nowrap;flex-shrink:0;
+          color:${isTarget?"rgba(255,255,255,.9)":t.color};">${escHtml(node.value)}</span>`:""}
+      </div>
+      <div style="margin-top:4px;"><span style="font-size:10px;padding:2px 8px;border-radius:10px;
+        color:${isTarget?"rgba(255,255,255,.75)":t.color};background:${isTarget?"rgba(255,255,255,.18)":t.bg};">${T[node.type]?.label||"企业"}</span></div>
+    </div>`;
   }
 
-  container.innerHTML = `<div style="padding:16px;overflow-y:auto;height:100%;box-sizing:border-box;">${buildNode(data, 0)}</div>`;
+  const arrow = `<div style="text-align:center;font-size:18px;color:#94a3b8;line-height:28px;margin:2px 0;">↓</div>`;
+
+  function secLabel(text, icon) {
+    return `<div style="display:flex;align-items:center;gap:6px;margin:8px 0 6px;font-size:11px;font-weight:600;color:#64748b;">
+      <span>${icon}</span><span>${text}</span><div style="flex:1;height:1px;background:#e2e8f0;margin-left:4px;"></div></div>`;
+  }
+
+  // 向上：先递归展示上层（实控人），再展示本节点（直接股东）
+  function buildUp(node, depth) {
+    const up = (node.shareholders || []).map(p => buildUp(p, depth + 1)).join("");
+    return up + `<div style="margin-left:${depth*20}px;margin-bottom:8px;">
+      ${depth>0?`<div style="color:#94a3b8;font-size:12px;margin-bottom:2px;">└──</div>`:""}
+      ${mkCard(node, false)}</div>`;
+  }
+
+  // 向下：先展示本节点，再递归展示下层（子公司→孙公司）
+  function buildDown(node, depth) {
+    const down = (node.investments || []).map(c => buildDown(c, depth + 1)).join("");
+    return `<div style="margin-left:${depth*20}px;margin-bottom:8px;">
+      ${depth>0?`<div style="color:#94a3b8;font-size:12px;margin-bottom:2px;">└──</div>`:""}
+      ${mkCard(node, false)}</div>` + down;
+  }
+
+  const shareholders = data.shareholders || data.children || [];
+  const investments  = data.investments  || [];
+
+  const upHtml   = shareholders.map(s => buildUp(s, 0)).join("");
+  const downHtml = investments.map(s => buildDown(s, 0)).join("");
+
+  container.innerHTML = `<div style="padding:16px;overflow-y:auto;height:100%;box-sizing:border-box;">
+    ${upHtml   ? secLabel("股东结构（上穿2层）","⬆") + upHtml   + arrow : ""}
+    <div style="margin-bottom:8px;">${mkCard(data, true)}</div>
+    ${downHtml ? arrow + secLabel("对外投资（下穿2层）","⬇") + downHtml : ""}
+    ${!upHtml&&!downHtml?`<div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:8px;">暂无股东/投资数据</div>`:""}
+  </div>`;
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

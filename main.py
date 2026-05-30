@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "47"
+APP_VERSION = "48"
 
 @app.get("/api/version")
 async def get_version():
@@ -292,28 +292,43 @@ async def get_equity_graph(company_id: int, refresh: bool = False):
         raise HTTPException(status_code=400, detail="需要配置 Kimi API")
     import httpx
     api_url = (base_url if base_url.endswith("/v1") else base_url + "/v1") + "/chat/completions"
-    prompt = f"""你是企业工商信息专家，请查询「{name}」的股权结构。
-严格按如下JSON格式返回，不要输出任何其他内容（不要markdown代码块，不要说明文字）：
+    prompt = f"""你是企业工商信息专家，请查询「{name}」的完整股权图谱，需包含：
+1. 向上穿透两层：直接股东（第1层）及其股东（第2层，实控人层）；
+2. 向下穿透两层：直接对外投资/子公司（第1层）及其下属企业（第2层）。
+
+严格按以下JSON格式返回，不加任何说明和代码块：
 {{
   "name": "企业全称",
   "type": "target",
-  "value": "",
-  "children": [
+  "shareholders": [
     {{
-      "name": "股东名称",
-      "type": "company",
+      "name": "直接股东名称",
+      "type": "company|person|state",
       "value": "51.00%",
-      "children": []
+      "shareholders": [
+        {{"name": "实控人", "type": "person", "value": "80.00%", "shareholders": []}}
+      ]
+    }}
+  ],
+  "investments": [
+    {{
+      "name": "子公司名称",
+      "type": "company",
+      "value": "100%",
+      "investments": [
+        {{"name": "孙公司", "type": "company", "value": "51%", "investments": []}}
+      ]
     }}
   ]
 }}
-规则：type只能是 target/company/person/state；value为持股比例；企业股东递归填children（最多3层）。
-若无法查询，返回：{{"error": "无法获取{name}的股权信息"}}"""
+
+type取值：target=目标企业, company=企业, person=自然人, state=国有/国资。
+某层无数据则数组留空。若完全无法查询，返回：{{"error": "无法获取{name}的股权信息"}}"""
     try:
         async with httpx.AsyncClient(timeout=30) as hc:
             r = await hc.post(api_url,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": "moonshot-v1-8k", "messages": [{"role": "user", "content": prompt}], "max_tokens": 2000},
+                json={"model": "moonshot-v1-8k", "messages": [{"role": "user", "content": prompt}], "max_tokens": 3000},
             )
         r.raise_for_status()
         raw = r.json()["choices"][0]["message"]["content"].strip()
