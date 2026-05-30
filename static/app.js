@@ -60,7 +60,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "54";
+const CLIENT_VERSION = "55";
 
 async function checkVersion() {
   try {
@@ -2272,56 +2272,123 @@ function _renderEquityChart(container, data) {
     state:   { color: "#7c3aed", bg: "#f5f3ff", icon: "🏛",  label: "国有/国资"},
   };
 
-  function mkCard(node, isTarget) {
-    const t = T[node.type] || T.company;
-    return `<div style="background:${isTarget?t.color:"#fff"};border:2px solid ${t.color};
-      border-radius:12px;padding:${isTarget?"14px 16px":"10px 14px"};box-shadow:0 2px 10px rgba(0,0,0,.08);">
-      <div style="display:flex;align-items:center;gap:8px;">
-        <span style="font-size:17px;flex-shrink:0;">${t.icon}</span>
-        <span style="font-size:${isTarget?"13px":"12px"};font-weight:600;color:${isTarget?"#fff":"#1e293b"};
-          flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escHtml(node.name)}">${escHtml(node.name)}</span>
-        ${node.value?`<span style="font-size:13px;font-weight:700;white-space:nowrap;flex-shrink:0;
-          color:${isTarget?"rgba(255,255,255,.9)":t.color};">${escHtml(node.value)}</span>`:""}
-      </div>
-      <div style="margin-top:4px;"><span style="font-size:10px;padding:2px 8px;border-radius:10px;
-        color:${isTarget?"rgba(255,255,255,.75)":t.color};background:${isTarget?"rgba(255,255,255,.18)":t.bg};">${T[node.type]?.label||"企业"}</span></div>
-    </div>`;
+  const NW = 136, NH = 54, HG = 22, VG = 52;
+
+  function subtreeW(node, key) {
+    const kids = node[key] || [];
+    if (!kids.length) return NW;
+    return Math.max(NW, kids.reduce((s, k) => s + subtreeW(k, key) + HG, -HG));
   }
 
-  const arrow = `<div style="text-align:center;font-size:18px;color:#94a3b8;line-height:28px;margin:2px 0;">↓</div>`;
-
-  function secLabel(text, icon) {
-    return `<div style="display:flex;align-items:center;gap:6px;margin:8px 0 6px;font-size:11px;font-weight:600;color:#64748b;">
-      <span>${icon}</span><span>${text}</span><div style="flex:1;height:1px;background:#e2e8f0;margin-left:4px;"></div></div>`;
+  function doLayout(node, key, cx, y, dir, pid, nodes, edges) {
+    const id = nodes.length;
+    nodes.push({ node, cx, y });
+    if (pid !== null) edges.push({ from: pid, to: id });
+    const kids = node[key] || [];
+    if (!kids.length) return;
+    const tw = kids.reduce((s, k) => s + subtreeW(k, key) + HG, -HG);
+    let lx = cx - tw / 2;
+    kids.forEach(k => {
+      const kw = subtreeW(k, key);
+      doLayout(k, key, lx + kw / 2, y + dir * (NH + VG), dir, id, nodes, edges);
+      lx += kw + HG;
+    });
   }
 
-  // 向上：先递归展示上层（实控人），再展示本节点（直接股东）
-  function buildUp(node, depth) {
-    const up = (node.shareholders || []).map(p => buildUp(p, depth + 1)).join("");
-    return up + `<div style="margin-left:${depth*20}px;margin-bottom:8px;">
-      ${depth>0?`<div style="color:#94a3b8;font-size:12px;margin-bottom:2px;">└──</div>`:""}
-      ${mkCard(node, false)}</div>`;
-  }
-
-  // 向下：先展示本节点，再递归展示下层（子公司→孙公司）
-  function buildDown(node, depth) {
-    const down = (node.investments || []).map(c => buildDown(c, depth + 1)).join("");
-    return `<div style="margin-left:${depth*20}px;margin-bottom:8px;">
-      ${depth>0?`<div style="color:#94a3b8;font-size:12px;margin-bottom:2px;">└──</div>`:""}
-      ${mkCard(node, false)}</div>` + down;
+  function maxLevels(arr, key) {
+    function d(n) { const k = n[key]||[]; return k.length ? 1+Math.max(...k.map(d)) : 1; }
+    return arr.length ? Math.max(...arr.map(d)) : 0;
   }
 
   const shareholders = data.shareholders || data.children || [];
   const investments  = data.investments  || [];
+  const upW   = shareholders.length ? shareholders.reduce((s,k)=>s+subtreeW(k,'shareholders')+HG,-HG) : 0;
+  const downW = investments.length  ? investments.reduce((s,k)=>s+subtreeW(k,'investments')+HG,-HG)   : 0;
+  const upLevels = maxLevels(shareholders, 'shareholders');
+  const targetCX = Math.max(NW, upW, downW) / 2 + 14;
+  const targetY  = upLevels * (NH + VG) + 14;
 
-  const upHtml   = shareholders.map(s => buildUp(s, 0)).join("");
-  const downHtml = investments.map(s => buildDown(s, 0)).join("");
+  const nodes = [], edges = [];
+  nodes.push({ node: data, cx: targetCX, y: targetY });
 
-  container.innerHTML = `<div style="padding:16px;overflow-y:auto;height:100%;box-sizing:border-box;">
-    ${upHtml   ? secLabel("股东结构","⬆") + upHtml   + arrow : ""}
-    <div style="margin-bottom:8px;">${mkCard(data, true)}</div>
-    ${downHtml ? arrow + secLabel("对外投资","⬇") + downHtml : ""}
-    ${!upHtml&&!downHtml?`<div style="text-align:center;color:#94a3b8;font-size:12px;margin-top:8px;">暂无股东/投资数据</div>`:""}
+  if (shareholders.length) {
+    const tw = shareholders.reduce((s,k)=>s+subtreeW(k,'shareholders')+HG,-HG);
+    let lx = targetCX - tw/2;
+    shareholders.forEach(s => {
+      const kw = subtreeW(s, 'shareholders');
+      doLayout(s, 'shareholders', lx+kw/2, targetY-(NH+VG), -1, 0, nodes, edges);
+      lx += kw + HG;
+    });
+  }
+  if (investments.length) {
+    const tw = investments.reduce((s,k)=>s+subtreeW(k,'investments')+HG,-HG);
+    let lx = targetCX - tw/2;
+    investments.forEach(s => {
+      const kw = subtreeW(s, 'investments');
+      doLayout(s, 'investments', lx+kw/2, targetY+(NH+VG), 1, 0, nodes, edges);
+      lx += kw + HG;
+    });
+  }
+
+  const pad = 16;
+  const minX  = Math.min(...nodes.map(n => n.cx - NW/2)) - pad;
+  const maxXv = Math.max(...nodes.map(n => n.cx + NW/2)) + pad;
+  const minY  = Math.min(...nodes.map(n => n.y))         - pad;
+  const maxYv = Math.max(...nodes.map(n => n.y + NH))    + pad;
+  const W = maxXv - minX, H = maxYv - minY;
+  nodes.forEach(n => { n.cx -= minX; n.y -= minY; });
+
+  let svgPaths = "";
+  edges.forEach(({ from, to }) => {
+    const fn = nodes[from], tn = nodes[to];
+    const isUp = tn.y + NH/2 < fn.y + NH/2;
+    const x1 = fn.cx, y1 = isUp ? fn.y       : fn.y + NH;
+    const x2 = tn.cx, y2 = isUp ? tn.y + NH  : tn.y;
+    const my = (y1 + y2) / 2;
+    svgPaths += `<path d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"/>`;
+    const pct = tn.node.value;
+    if (pct) {
+      const lx = (x1 + x2) / 2, ly = my;
+      const tw2 = Math.max(30, pct.length * 6.5 + 10);
+      svgPaths += `<rect x="${lx-tw2/2}" y="${ly-9}" width="${tw2}" height="18" rx="9" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+        <text x="${lx}" y="${ly+1}" text-anchor="middle" dominant-baseline="middle" font-size="10" font-weight="600" fill="#475569">${escHtml(pct)}</text>`;
+    }
+  });
+
+  let nodesHtml = "";
+  nodes.forEach(({ node, cx, y }) => {
+    const t = T[node.type] || T.company;
+    const isTarget = node.type === 'target';
+    nodesHtml += `<div style="position:absolute;left:${cx-NW/2}px;top:${y}px;width:${NW}px;height:${NH}px;
+      background:${isTarget?t.color:'#fff'};border:2px solid ${t.color};border-radius:10px;
+      box-shadow:0 2px 8px rgba(0,0,0,${isTarget?.14:.07});
+      display:flex;flex-direction:column;justify-content:center;padding:4px 8px;box-sizing:border-box;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span style="font-size:14px;line-height:1;flex-shrink:0;">${t.icon}</span>
+        <span style="font-size:11px;font-weight:600;line-height:1.3;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+          color:${isTarget?'#fff':'#1e293b'};" title="${escHtml(node.name)}">${escHtml(node.name)}</span>
+      </div>
+      <div style="margin-top:3px;">
+        <span style="font-size:9px;padding:1px 7px;border-radius:6px;
+          color:${isTarget?'rgba(255,255,255,.8)':t.color};
+          background:${isTarget?'rgba(255,255,255,.18)':t.bg};">${t.label||'企业'}</span>
+      </div>
+    </div>`;
+  });
+
+  container.style.overflow = 'auto';
+  container.style.padding = '0';
+  if (!shareholders.length && !investments.length) {
+    container.innerHTML = `<div style="text-align:center;color:#94a3b8;font-size:12px;padding:40px 0;">暂无股东/投资数据</div>`;
+    return;
+  }
+  container.innerHTML = `<div style="padding:16px;display:inline-block;min-width:100%;box-sizing:border-box;">
+    <div style="position:relative;width:${W}px;height:${H}px;margin:0 auto;">
+      <svg style="position:absolute;top:0;left:0;pointer-events:none;" width="${W}" height="${H}">
+        ${svgPaths}
+      </svg>
+      ${nodesHtml}
+    </div>
   </div>`;
 }
 
