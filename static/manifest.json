@@ -1,7 +1,7 @@
 {
-  "name": "客户档案系统",
-  "short_name": "客户档案",
-  "description": "银行对公客户管理",
+  "name": "凑合用",
+  "short_name": "凑合用",
+  "description": "能用就行 · 别太较真",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a3a6b",
