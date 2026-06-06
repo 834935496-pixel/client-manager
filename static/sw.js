@@ -1,5 +1,5 @@
-const CACHE = "client-manager-v60";
-const STATIC = ["/", "/style.css?v=20", "/app.js?v=52", "/manifest.json", "/icon-192.png", "/icon-512.png"];
+const CACHE = "client-manager-v61";
+const STATIC = ["/", "/style.css?v=20", "/app.js?v=53", "/manifest.json", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(STATIC)));

@@ -51,9 +51,11 @@ async function doLogin() {
 }
 
 function apiFetch(path, opts = {}) {
+  // FormData(文件上传)时不能手动设 Content-Type，否则会覆盖浏览器自动生成的 multipart boundary 导致后端收不到 file
+  const base = opts.body instanceof FormData ? {} : { "Content-Type": "application/json" };
   return fetch(`${API}${path}`, {
     ...opts,
-    headers: { "Content-Type": "application/json", "X-Access-Token": token, ...(opts.headers || {}) },
+    headers: { ...base, "X-Access-Token": token, ...(opts.headers || {}) },
   }).then(res => {
     if (res.status === 401) { showLogin(); throw new Error("401"); }
     return res;
@@ -62,7 +64,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "66";
+const CLIENT_VERSION = "67";
 
 async function checkVersion() {
   try {
