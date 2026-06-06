@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from datetime import date
@@ -2450,22 +2451,30 @@ async def _extract_text_hybrid_pdf(path: Path, max_pages: int = 60) -> str:
                 ocr_needed.append((i, b64))
             # 无 OCR 配置时跳过扫描页
 
-    # OCR 扫描页
-    for i, b64 in ocr_needed:
-        try:
-            resp = ocr_client.chat.completions.create(
-                model="moonshot-v1-8k-vision-preview",
-                messages=[{"role": "user", "content": [
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    {"type": "text", "text": "请将这页文档的全部文字内容原文输出，保持段落结构，不添加任何解释。"},
-                ]}],
-                max_tokens=2000,
-            )
-            t = (resp.choices[0].message.content or "").strip()
-            if t:
-                page_texts.append((i, t))
-        except Exception as e:
-            print(f"OCR page {i+1} error: {e}")
+    # OCR 扫描页（并发，最多同时 5 页，避免逐页串行累加超时）
+    sem = asyncio.Semaphore(5)
+
+    async def _ocr_page(idx: int, img_b64: str):
+        async with sem:
+            try:
+                resp = await asyncio.to_thread(
+                    ocr_client.chat.completions.create,
+                    model="moonshot-v1-8k-vision-preview",
+                    messages=[{"role": "user", "content": [
+                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
+                        {"type": "text", "text": "请将这页文档的全部文字内容原文输出，保持段落结构，不添加任何解释。"},
+                    ]}],
+                    max_tokens=2000,
+                )
+                t = (resp.choices[0].message.content or "").strip()
+                return (idx, t) if t else None
+            except Exception as e:
+                print(f"OCR page {idx+1} error: {e}")
+                return None
+
+    if ocr_needed:
+        results = await asyncio.gather(*[_ocr_page(i, b64) for i, b64 in ocr_needed])
+        page_texts.extend(r for r in results if r)
 
     pdf.close()
     page_texts.sort(key=lambda x: x[0])
