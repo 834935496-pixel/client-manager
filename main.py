@@ -53,7 +53,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "67"
+APP_VERSION = "68"
 
 @app.get("/api/version")
 async def get_version():
@@ -599,6 +599,24 @@ class CreditLineBody(BaseModel):
     status: str = "正常"
     notes: str = ""
 
+class DrawdownBody(BaseModel):
+    drawdown_type: str = ""
+    amount: float = 0
+    drawdown_date: str = ""
+    due_date: str = ""
+    interest_rate: str = ""
+    status: str = "在用"
+    notes: str = ""
+
+
+def _recalc_line_used(conn, line_id: int):
+    """根据用信台账重算授信品种已用额度（只计'在用'状态），实现额度此消彼长。"""
+    r = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) FROM credit_drawdowns WHERE line_id=? AND status='在用'",
+        (line_id,)
+    ).fetchone()
+    conn.execute("UPDATE credit_lines SET used_amount=? WHERE id=?", (r[0], line_id))
+
 # ── 授信设施（最高控制额度 / 组合 / 特别 / 专项）────────────────────────────
 
 @app.get("/api/companies/{company_id}/credit-facilities")
@@ -612,8 +630,12 @@ def list_credit_facilities(company_id: int):
         "SELECT * FROM credit_lines WHERE company_id=? ORDER BY end_date, created_at DESC",
         (company_id,)
     ).fetchall()]
+    drawdowns = [dict(r) for r in conn.execute(
+        "SELECT * FROM credit_drawdowns WHERE company_id=? ORDER BY drawdown_date DESC, created_at DESC",
+        (company_id,)
+    ).fetchall()]
     conn.close()
-    return {"facilities": facs, "lines": lines}
+    return {"facilities": facs, "lines": lines, "drawdowns": drawdowns}
 
 @app.post("/api/companies/{company_id}/credit-facilities")
 def create_credit_facility(company_id: int, body: CreditFacilityBody):
@@ -707,6 +729,7 @@ def create_credit_line(company_id: int, body: CreditLineBody):
          body.credit_amount, body.used_amount, body.interest_rate, body.guarantee_type,
          body.start_date, body.end_date, body.status, body.notes)
     )
+    _recalc_line_used(conn, cur.lastrowid)
     conn.commit()
     row = conn.execute("SELECT * FROM credit_lines WHERE id=?", (cur.lastrowid,)).fetchone()
     conn.close()
@@ -724,6 +747,7 @@ def update_credit_line(line_id: int, body: CreditLineBody):
          body.credit_amount, body.used_amount, body.interest_rate, body.guarantee_type,
          body.start_date, body.end_date, body.status, body.notes, line_id)
     )
+    _recalc_line_used(conn, line_id)
     conn.commit()
     row = conn.execute("SELECT * FROM credit_lines WHERE id=?", (line_id,)).fetchone()
     conn.close()
@@ -732,7 +756,87 @@ def update_credit_line(line_id: int, body: CreditLineBody):
 @app.delete("/api/credit-lines/{line_id}")
 def delete_credit_line(line_id: int):
     conn = get_db()
+    conn.execute("DELETE FROM credit_drawdowns WHERE line_id=?", (line_id,))
     conn.execute("DELETE FROM credit_lines WHERE id=?", (line_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+# ── 用信台账（每笔实际用信，挂授信品种下，与授信额度此消彼长）──────────────
+
+@app.get("/api/companies/{company_id}/drawdowns")
+def list_drawdowns(company_id: int):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM credit_drawdowns WHERE company_id=? ORDER BY drawdown_date DESC, created_at DESC",
+        (company_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+@app.post("/api/credit-lines/{line_id}/drawdowns")
+def create_drawdown(line_id: int, body: DrawdownBody):
+    conn = get_db()
+    line = conn.execute("SELECT company_id FROM credit_lines WHERE id=?", (line_id,)).fetchone()
+    if not line:
+        conn.close()
+        raise HTTPException(404, "授信品种不存在")
+    cur = conn.execute(
+        """INSERT INTO credit_drawdowns (company_id, line_id, drawdown_type, amount,
+             drawdown_date, due_date, interest_rate, status, notes)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (line["company_id"], line_id, body.drawdown_type, body.amount,
+         body.drawdown_date, body.due_date, body.interest_rate, body.status, body.notes)
+    )
+    _recalc_line_used(conn, line_id)
+    conn.commit()
+    row = conn.execute("SELECT * FROM credit_drawdowns WHERE id=?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+@app.put("/api/drawdowns/{dd_id}")
+def update_drawdown(dd_id: int, body: DrawdownBody):
+    conn = get_db()
+    row = conn.execute("SELECT line_id FROM credit_drawdowns WHERE id=?", (dd_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "用信记录不存在")
+    conn.execute(
+        """UPDATE credit_drawdowns SET drawdown_type=?, amount=?, drawdown_date=?,
+             due_date=?, interest_rate=?, status=?, notes=? WHERE id=?""",
+        (body.drawdown_type, body.amount, body.drawdown_date, body.due_date,
+         body.interest_rate, body.status, body.notes, dd_id)
+    )
+    _recalc_line_used(conn, row["line_id"])
+    conn.commit()
+    r = conn.execute("SELECT * FROM credit_drawdowns WHERE id=?", (dd_id,)).fetchone()
+    conn.close()
+    return dict(r)
+
+@app.patch("/api/drawdowns/{dd_id}/settle")
+def settle_drawdown(dd_id: int):
+    """切换用信「在用 / 已结清」状态，并重算授信品种已用额度（结清即释放额度）。"""
+    conn = get_db()
+    row = conn.execute("SELECT line_id, status FROM credit_drawdowns WHERE id=?", (dd_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "用信记录不存在")
+    new_status = "已结清" if row["status"] == "在用" else "在用"
+    conn.execute("UPDATE credit_drawdowns SET status=? WHERE id=?", (new_status, dd_id))
+    _recalc_line_used(conn, row["line_id"])
+    conn.commit()
+    conn.close()
+    return {"ok": True, "status": new_status}
+
+@app.delete("/api/drawdowns/{dd_id}")
+def delete_drawdown(dd_id: int):
+    conn = get_db()
+    row = conn.execute("SELECT line_id FROM credit_drawdowns WHERE id=?", (dd_id,)).fetchone()
+    if not row:
+        conn.close()
+        raise HTTPException(404, "用信记录不存在")
+    conn.execute("DELETE FROM credit_drawdowns WHERE id=?", (dd_id,))
+    _recalc_line_used(conn, row["line_id"])
     conn.commit()
     conn.close()
     return {"ok": True}

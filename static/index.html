@@ -787,15 +787,10 @@
           </select>
         </div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">业务金额（万元）</label>
-          <input class="form-input" id="cl-credit-amount" type="number" placeholder="0">
-        </div>
-        <div class="form-group">
-          <label class="form-label">已用余额（万元）</label>
-          <input class="form-input" id="cl-used-amount" type="number" placeholder="0">
-        </div>
+      <div class="form-group">
+        <label class="form-label">授信额度（万元）</label>
+        <input class="form-input" id="cl-credit-amount" type="number" placeholder="0">
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">已用 / 可用额度由下方「用信台账」自动计算，无需手填</div>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -830,6 +825,64 @@
       </div>
       <button class="btn btn-primary" onclick="saveCreditLine()">保存</button>
       <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('credit-line-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- 用信录入 -->
+  <div class="modal-overlay" id="drawdown-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="dd-modal-title">记一笔用信</div>
+      <input type="hidden" id="dd-line-id">
+      <input type="hidden" id="edit-dd-id">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">用信类型</label>
+          <select class="form-select" id="dd-type">
+            <option>流动资金贷款</option>
+            <option>固定资产贷款</option>
+            <option>银行承兑汇票</option>
+            <option>信用证</option>
+            <option>保函</option>
+            <option>票据贴现</option>
+            <option>贸易融资</option>
+            <option>其他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">用信金额（万元）*</label>
+          <input class="form-input" id="dd-amount" type="number" placeholder="0">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">发放日</label>
+          <input class="form-input" id="dd-date" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">到期日</label>
+          <input class="form-input" id="dd-due" type="date">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">利率</label>
+          <input class="form-input" id="dd-rate" placeholder="如：3.85%">
+        </div>
+        <div class="form-group">
+          <label class="form-label">状态</label>
+          <select class="form-select" id="dd-status">
+            <option value="在用">在用（占用额度）</option>
+            <option value="已结清">已结清（释放额度）</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <textarea class="form-textarea" id="dd-notes" placeholder="放款用途、还款安排等..." rows="2"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="saveDrawdown()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('drawdown-modal')">取消</button>
     </div>
   </div>
 
@@ -957,7 +1010,7 @@
   <button class="fab" id="fab" onclick="showQuickAdd()">＋</button>
 
 </div>
-<script src="app.js?v=53"></script>
+<script src="app.js?v=54"></script>
 <script>
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});

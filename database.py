@@ -278,6 +278,27 @@ def _init_credit_lines(conn):
         if col not in fac_cols:
             conn.execute(f"ALTER TABLE credit_facilities ADD COLUMN {col} {defn}")
 
+    # 用信台账：每笔实际用信，挂在授信品种 credit_lines 下，与授信额度此消彼长
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS credit_drawdowns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            line_id INTEGER NOT NULL,
+            drawdown_type TEXT DEFAULT '',
+            amount REAL DEFAULT 0,
+            drawdown_date TEXT DEFAULT '',
+            due_date TEXT DEFAULT '',
+            interest_rate TEXT DEFAULT '',
+            status TEXT DEFAULT '在用',
+            notes TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+            FOREIGN KEY (line_id) REFERENCES credit_lines(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_drawdowns_line ON credit_drawdowns(line_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_drawdowns_company ON credit_drawdowns(company_id)")
+
     conn.commit()
 
 

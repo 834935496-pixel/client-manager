@@ -64,7 +64,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "67";
+const CLIENT_VERSION = "68";
 
 async function checkVersion() {
   try {
@@ -2889,6 +2889,11 @@ function renderSubFacility(fac, lines, today) {
 function renderCreditLine(l, today) {
   const expiring = l.end_date && l.end_date <= addDays(today, 30) && l.end_date >= today && l.status !== "已结清";
   const overdue  = l.end_date && l.end_date < today && l.status !== "已结清";
+  const dds = (_creditData.drawdowns || []).filter((d) => d.line_id === l.id);
+  const used = dds.filter((d) => d.status === "在用").reduce((s, d) => s + (d.amount || 0), 0);
+  const credit = l.credit_amount || 0;
+  const avail = credit - used;
+  const pct = credit > 0 ? Math.min(100, (used / credit) * 100) : 0;
   return `
   <div class="cl-item${overdue ? " cl-overdue" : expiring ? " cl-expiring" : ""}">
     <div class="cl-item-row">
@@ -2897,18 +2902,50 @@ function renderCreditLine(l, today) {
     </div>
     <div class="cl-item-meta">
       ${l.credit_type ? escHtml(l.credit_type) : ""}
-      ${l.credit_amount ? " · " + l.credit_amount + "万" : ""}
-      ${l.used_amount  ? " · 已用" + l.used_amount + "万" : ""}
       ${l.interest_rate ? " · " + escHtml(l.interest_rate) : ""}
       ${l.guarantee_type ? " · " + escHtml(l.guarantee_type) : ""}
     </div>
+    ${credit ? `<div style="margin-top:6px;">
+      <div style="height:6px;border-radius:3px;background:#eee;overflow:hidden;">
+        <div style="height:100%;width:${pct.toFixed(0)}%;background:${used > credit ? "var(--danger)" : "var(--primary)"};transition:width .3s;"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:3px;">
+        授信 <strong>${credit}万</strong> · 已用 <strong>${used.toFixed(0)}万</strong> · 可用 <strong style="${avail < 0 ? "color:var(--danger)" : "color:var(--primary)"}">${avail.toFixed(0)}万</strong>
+      </div>
+    </div>` : ""}
     ${l.end_date ? `<div class="cl-item-date${overdue ? " text-danger" : expiring ? " text-warning" : ""}">
       ${l.start_date ? l.start_date + " → " : ""}到期 ${l.end_date}${overdue ? " ⚠️逾期" : expiring ? " ⚠️即将到期" : ""}
     </div>` : ""}
     ${l.notes ? `<div class="cl-notes">${escHtml(l.notes)}</div>` : ""}
+    <div style="margin-top:8px;">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:2px;">用信明细（${dds.length}笔）</div>
+      ${dds.length ? dds.map((d) => renderDrawdown(d, today)).join("") : '<div style="font-size:11px;color:#bbb;padding:2px 0;">暂无用信，点下方「＋记一笔用信」</div>'}
+    </div>
     <div class="cl-actions">
+      <button class="btn btn-outline btn-sm" style="color:var(--primary);border-color:var(--primary);" onclick="showDrawdownModal(${l.id}, null)">＋记一笔用信</button>
       <button class="btn btn-outline btn-sm" onclick="editCreditLine(${l.id})">编辑</button>
       <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="deleteCreditLine(${l.id})">删除</button>
+    </div>
+  </div>`;
+}
+
+function renderDrawdown(d, today) {
+  const settled = d.status === "已结清";
+  const overdue = d.due_date && d.due_date < today && !settled;
+  return `
+  <div style="display:flex;flex-direction:column;gap:2px;padding:6px 8px;margin-top:4px;border-left:3px solid ${settled ? "#ccc" : "var(--primary)"};background:${settled ? "#fafafa" : "#f0f7ff"};border-radius:0 6px 6px 0;${settled ? "opacity:.6;" : ""}">
+    <div style="display:flex;align-items:center;gap:6px;font-size:12px;flex-wrap:wrap;">
+      <span style="font-weight:600;">${escHtml(d.drawdown_type || "用信")}</span>
+      <span style="font-weight:700;color:var(--primary);">${(d.amount || 0).toFixed(0)}万</span>
+      <span style="font-size:10px;padding:1px 6px;border-radius:8px;background:${settled ? "#eee;color:#999" : "#e3f2fd;color:#1565c0"};">${settled ? "已结清" : "在用"}</span>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);">
+      ${d.drawdown_date ? "发放 " + d.drawdown_date : ""}${d.due_date ? ` · <span style="${overdue ? "color:var(--danger)" : ""}">到期 ${d.due_date}${overdue ? " ⚠️" : ""}</span>` : ""}${d.interest_rate ? " · " + escHtml(d.interest_rate) : ""}${d.notes ? " · " + escHtml(d.notes) : ""}
+    </div>
+    <div style="display:flex;gap:12px;margin-top:2px;">
+      <span onclick="settleDrawdown(${d.id})" style="font-size:11px;color:var(--primary);cursor:pointer;">${settled ? "↩ 恢复在用" : "✓ 结清"}</span>
+      <span onclick="editDrawdown(${d.id})" style="font-size:11px;color:var(--primary);cursor:pointer;">编辑</span>
+      <span onclick="deleteDrawdown(${d.id})" style="font-size:11px;color:var(--danger);cursor:pointer;">删除</span>
     </div>
   </div>`;
 }
@@ -3028,7 +3065,6 @@ function showCreditLineModal(line, facilityId) {
   document.getElementById("cl-credit-type").value = line ? line.credit_type : "";
   document.getElementById("cl-status").value = line ? line.status : "正常";
   document.getElementById("cl-credit-amount").value = line ? line.credit_amount : "";
-  document.getElementById("cl-used-amount").value = line ? line.used_amount : "";
   document.getElementById("cl-start-date").value = line ? line.start_date : "";
   document.getElementById("cl-end-date").value = line ? line.end_date : "";
   document.getElementById("cl-interest-rate").value = line ? line.interest_rate : "";
@@ -3051,7 +3087,6 @@ async function saveCreditLine() {
     credit_type: document.getElementById("cl-credit-type").value,
     status: document.getElementById("cl-status").value,
     credit_amount: parseFloat(document.getElementById("cl-credit-amount").value) || 0,
-    used_amount: parseFloat(document.getElementById("cl-used-amount").value) || 0,
     start_date: document.getElementById("cl-start-date").value,
     end_date: document.getElementById("cl-end-date").value,
     interest_rate: document.getElementById("cl-interest-rate").value.trim(),
@@ -3071,6 +3106,61 @@ async function saveCreditLine() {
 async function deleteCreditLine(id) {
   showConfirm("删除此业务记录？", async () => {
     await apiFetch(`/api/credit-lines/${id}`, { method: "DELETE" });
+    loadCreditLines();
+  });
+}
+
+// ── 用信台账 CRUD（与授信品种额度此消彼长）──────────────────────────────────────
+
+function showDrawdownModal(lineId, dd) {
+  document.getElementById("dd-line-id").value = dd ? dd.line_id : lineId;
+  document.getElementById("edit-dd-id").value = dd ? dd.id : "";
+  document.getElementById("dd-modal-title").textContent = dd ? "编辑用信" : "记一笔用信";
+  document.getElementById("dd-type").value = dd ? dd.drawdown_type : "流动资金贷款";
+  document.getElementById("dd-amount").value = dd ? dd.amount : "";
+  document.getElementById("dd-date").value = dd ? dd.drawdown_date : todayISO();
+  document.getElementById("dd-due").value = dd ? dd.due_date : "";
+  document.getElementById("dd-rate").value = dd ? dd.interest_rate : "";
+  document.getElementById("dd-status").value = dd ? dd.status : "在用";
+  document.getElementById("dd-notes").value = dd ? dd.notes : "";
+  showModal("drawdown-modal");
+}
+
+function editDrawdown(id) {
+  const d = (_creditData.drawdowns || []).find((x) => x.id === id);
+  if (d) showDrawdownModal(d.line_id, d);
+}
+
+async function saveDrawdown() {
+  const lineId = document.getElementById("dd-line-id").value;
+  const editId = document.getElementById("edit-dd-id").value;
+  const body = {
+    drawdown_type: document.getElementById("dd-type").value.trim(),
+    amount: parseFloat(document.getElementById("dd-amount").value) || 0,
+    drawdown_date: document.getElementById("dd-date").value,
+    due_date: document.getElementById("dd-due").value,
+    interest_rate: document.getElementById("dd-rate").value.trim(),
+    status: document.getElementById("dd-status").value,
+    notes: document.getElementById("dd-notes").value.trim(),
+  };
+  if (!body.amount) { alert("请填写用信金额"); return; }
+  if (editId) {
+    await apiFetch(`/api/drawdowns/${editId}`, { method: "PUT", body: JSON.stringify(body) });
+  } else {
+    await apiFetch(`/api/credit-lines/${lineId}/drawdowns`, { method: "POST", body: JSON.stringify(body) });
+  }
+  hideModal("drawdown-modal");
+  loadCreditLines();
+}
+
+async function settleDrawdown(id) {
+  await apiFetch(`/api/drawdowns/${id}/settle`, { method: "PATCH" });
+  loadCreditLines();
+}
+
+async function deleteDrawdown(id) {
+  showConfirm("删除这笔用信记录？", async () => {
+    await apiFetch(`/api/drawdowns/${id}`, { method: "DELETE" });
     loadCreditLines();
   });
 }
