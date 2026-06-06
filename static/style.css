@@ -490,7 +490,7 @@ body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; 
 .risk-loss        { background: #ffebee; color: #b71c1c; }
 .risk-closed      { background: #f5f5f5; color: #9e9e9e; }
 
-/* ── Credit line items ───────────────────────────────────────────────────── */
+/* ── Credit stat cards ───────────────────────────────────────────────────── */
 .credit-stat-card {
   background: #f0f4ff;
   border-radius: 10px;
@@ -500,29 +500,63 @@ body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; 
 .credit-stat-val { font-size: 16px; font-weight: 700; color: var(--primary); }
 .credit-stat-lbl { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
-.credit-line-item {
+/* ── 最高控制额度卡片（根节点） ─────────────────────────────────────────── */
+.fac-root {
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 12px;
+  background: #fff;
+}
+.fac-root.fac-overdue  { border-color: #f44336; background: #fff5f5; }
+.fac-root.fac-expiring { border-color: #ff9800; background: #fffde7; }
+.fac-root-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 6px; }
+.fac-type-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #e8f0fe;
+  color: var(--primary);
+  margin-right: 4px;
+}
+.fac-sub-tag { background: #f3e5f5; color: #6a1b9a; }
+.fac-name   { font-size: 13px; color: var(--text-muted); }
+.fac-amount { font-size: 15px; font-weight: 700; color: var(--primary); }
+.fac-meta   { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.fac-children { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ── 子额度（组合/特别/专项）────────────────────────────────────────────── */
+.fac-sub {
+  background: #f8faff;
+  border: 1px solid #dde4f0;
+  border-radius: 10px;
+  padding: 12px;
+  margin-left: 8px;
+}
+.fac-sub.fac-overdue  { border-color: #f44336; background: #fff5f5; }
+.fac-sub.fac-expiring { border-color: #ff9800; background: #fffde7; }
+.fac-sub-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 6px; }
+.fac-sub-amounts { display: flex; gap: 14px; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.fac-sub-amounts strong { color: var(--text); }
+
+/* ── 具体业务条目 ────────────────────────────────────────────────────────── */
+.cl-item {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 10px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 6px;
 }
-.credit-line-item.cl-overdue  { border-color: #f44336; background: #fff5f5; }
-.credit-line-item.cl-expiring { border-color: #ff9800; background: #fffde7; }
-.cl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.cl-name   { font-size: 14px; font-weight: 600; color: var(--text); }
-.cl-meta   { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
-.cl-amounts {
-  display: flex;
-  gap: 16px;
-  font-size: 13px;
-  color: var(--text-muted);
-  margin-bottom: 6px;
-}
-.cl-amounts strong { color: var(--text); }
-.cl-dates  { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
-.cl-notes  { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
-.cl-actions { display: flex; gap: 8px; margin-top: 8px; }
+.cl-item.cl-overdue  { border-color: #f44336; background: #fff5f5; }
+.cl-item.cl-expiring { border-color: #ff9800; background: #fffde7; }
+.cl-item-row  { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.cl-item-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.cl-item-meta { font-size: 12px; color: var(--text-muted); margin-bottom: 3px; }
+.cl-item-date { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.cl-notes  { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; font-style: italic; }
+.cl-actions { display: flex; gap: 8px; margin-top: 6px; }
 .text-danger  { color: #f44336 !important; }
 .text-warning { color: #ff9800 !important; }
 

@@ -219,10 +219,32 @@ def _add_company_ext_fields(conn):
 
 
 def _init_credit_lines(conn):
+    # 授信设施表（最高控制额度 + 三类子额度）
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS credit_facilities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            facility_type TEXT NOT NULL DEFAULT '组合额度',
+            parent_id INTEGER,
+            name TEXT DEFAULT '',
+            approved_amount REAL DEFAULT 0,
+            approval_no TEXT DEFAULT '',
+            start_date TEXT DEFAULT '',
+            end_date TEXT DEFAULT '',
+            notes TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+            FOREIGN KEY (parent_id) REFERENCES credit_facilities(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_fac_company ON credit_facilities(company_id)")
+
+    # 具体业务表
     conn.execute("""
         CREATE TABLE IF NOT EXISTS credit_lines (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             company_id INTEGER NOT NULL,
+            facility_id INTEGER,
             product_name TEXT NOT NULL,
             credit_type TEXT DEFAULT '',
             credit_amount REAL DEFAULT 0,
@@ -234,11 +256,18 @@ def _init_credit_lines(conn):
             status TEXT DEFAULT '正常',
             notes TEXT DEFAULT '',
             created_at TEXT DEFAULT (datetime('now', 'localtime')),
-            FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+            FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+            FOREIGN KEY (facility_id) REFERENCES credit_facilities(id) ON DELETE SET NULL
         )
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_lines_company ON credit_lines(company_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_lines_end ON credit_lines(end_date)")
+
+    # 迁移：为已有 credit_lines 补充 facility_id 列
+    cl_cols = {r[1] for r in conn.execute("PRAGMA table_info(credit_lines)").fetchall()}
+    if "facility_id" not in cl_cols:
+        conn.execute("ALTER TABLE credit_lines ADD COLUMN facility_id INTEGER")
+
     conn.commit()
 
 

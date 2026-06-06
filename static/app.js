@@ -62,7 +62,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "62";
+const CLIENT_VERSION = "63";
 
 async function checkVersion() {
   try {
@@ -2614,62 +2614,7 @@ async function _saveEquityNode() {
 
 // ── 授信台账 ──────────────────────────────────────────────────────────────────
 
-let _editCreditLineId = null;
-
-async function loadCreditLines() {
-  const res = await apiFetch(`/api/companies/${currentCompanyId}/credit-lines`);
-  const lines = await res.json();
-  renderCreditLines(lines);
-}
-
-function renderCreditLines(lines) {
-  const el = document.getElementById("credit-lines-list");
-  const summary = document.getElementById("credit-summary");
-
-  const active = lines.filter((l) => l.status !== "已结清");
-  const totalCredit = active.reduce((s, l) => s + (l.credit_amount || 0), 0);
-  const totalUsed = active.reduce((s, l) => s + (l.used_amount || 0), 0);
-  const available = totalCredit - totalUsed;
-  summary.innerHTML = [
-    ["授信总额", totalCredit.toFixed(0) + "万"],
-    ["已用额度", totalUsed.toFixed(0) + "万"],
-    ["可用额度", available.toFixed(0) + "万"],
-  ].map(([l, v]) => `<div class="credit-stat-card"><div class="credit-stat-val">${v}</div><div class="credit-stat-lbl">${l}</div></div>`).join("");
-
-  if (!lines.length) {
-    el.innerHTML = '<div class="empty"><div class="empty-icon">💳</div><p>暂无授信记录</p></div>';
-    return;
-  }
-  const today = todayISO();
-  el.innerHTML = lines.map((l) => {
-    const expiring = l.end_date && l.end_date <= addDays(today, 30) && l.status !== "已结清";
-    const overdue = l.end_date && l.end_date < today && l.status !== "已结清";
-    return `<div class="credit-line-item${overdue ? " cl-overdue" : expiring ? " cl-expiring" : ""}">
-      <div class="cl-header">
-        <span class="cl-name">${escHtml(l.product_name)}</span>
-        <span class="risk-badge risk-${_riskCls(l.status)}">${escHtml(l.status)}</span>
-      </div>
-      <div class="cl-meta">
-        ${l.credit_type ? escHtml(l.credit_type) + " · " : ""}
-        ${l.guarantee_type ? escHtml(l.guarantee_type) + " · " : ""}
-        ${l.interest_rate ? "利率 " + escHtml(l.interest_rate) : ""}
-      </div>
-      <div class="cl-amounts">
-        <span>授信 <strong>${l.credit_amount || 0}万</strong></span>
-        <span>已用 <strong>${l.used_amount || 0}万</strong></span>
-        <span>可用 <strong>${(l.credit_amount - l.used_amount).toFixed(0)}万</strong></span>
-      </div>
-      ${l.end_date ? `<div class="cl-dates${overdue ? " text-danger" : expiring ? " text-warning" : ""}">
-        ${l.start_date ? l.start_date + " → " : ""}到期 ${l.end_date}${overdue ? " ⚠️逾期" : expiring ? " ⚠️即将到期" : ""}
-      </div>` : ""}
-      ${l.notes ? `<div class="cl-notes">${escHtml(l.notes)}</div>` : ""}
-      <div class="cl-actions">
-        <button class="btn btn-outline btn-sm" onclick="editCreditLine(${l.id})">编辑</button>
-        <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="deleteCreditLine(${l.id})">删除</button>
-      </div>
-    </div>`;
-  }).join("");
-}
+let _creditData = { facilities: [], lines: [] };
 
 function addDays(dateStr, days) {
   const d = new Date(dateStr);
@@ -2683,10 +2628,192 @@ function _riskCls(status) {
   return m[status] || "normal";
 }
 
-function showCreditLineModal(line = null) {
-  _editCreditLineId = line ? line.id : null;
-  document.getElementById("credit-line-modal-title").textContent = line ? "编辑授信" : "新增授信";
+async function loadCreditLines() {
+  const res = await apiFetch(`/api/companies/${currentCompanyId}/credit-facilities`);
+  _creditData = await res.json();
+  renderCreditTree(_creditData);
+}
+
+function renderCreditTree({ facilities, lines }) {
+  const today = todayISO();
+  const summary = document.getElementById("credit-summary");
+  const tree = document.getElementById("credit-facilities-tree");
+
+  // 顶部汇总：所有有效业务
+  const activeLines = lines.filter((l) => l.status !== "已结清");
+  const totalCredit = activeLines.reduce((s, l) => s + (l.credit_amount || 0), 0);
+  const totalUsed   = activeLines.reduce((s, l) => s + (l.used_amount   || 0), 0);
+  summary.innerHTML = [
+    ["授信总额", totalCredit.toFixed(0) + "万"],
+    ["已用余额", totalUsed.toFixed(0) + "万"],
+    ["可用额度", (totalCredit - totalUsed).toFixed(0) + "万"],
+  ].map(([l, v]) => `<div class="credit-stat-card"><div class="credit-stat-val">${v}</div><div class="credit-stat-lbl">${l}</div></div>`).join("");
+
+  if (!facilities.length) {
+    tree.innerHTML = '<div class="empty"><div class="empty-icon">💳</div><p>暂无授信记录</p><p style="font-size:13px;margin-top:6px;">点击「＋新增授信批复」录入</p></div>';
+    return;
+  }
+
+  // 最高控制额度为根节点，其余为子节点
+  const roots   = facilities.filter((f) => f.facility_type === "最高控制额度");
+  const subs    = facilities.filter((f) => f.facility_type !== "最高控制额度");
+  const orphans = subs.filter((f) => !facilities.find((r) => r.id === f.parent_id));
+
+  const allRoots = [...roots, ...orphans];
+
+  tree.innerHTML = allRoots.map((root) => {
+    const children = subs.filter((f) => f.parent_id === root.id);
+    const rootExpiring = root.end_date && root.end_date <= addDays(today, 90) && root.end_date >= today;
+    const rootOverdue  = root.end_date && root.end_date < today;
+    return `
+    <div class="fac-root${rootOverdue ? " fac-overdue" : rootExpiring ? " fac-expiring" : ""}">
+      <div class="fac-root-header">
+        <div>
+          <span class="fac-type-tag">${escHtml(root.facility_type)}</span>
+          ${root.name ? `<span class="fac-name">${escHtml(root.name)}</span>` : ""}
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span class="fac-amount">${root.approved_amount || 0}万</span>
+          <button class="icon-btn" style="font-size:13px;" onclick="showFacilityModal(${JSON.stringify(root).replace(/"/g,'&quot;')}, null)">✏️</button>
+          <button class="icon-btn" style="font-size:13px;color:var(--danger);" onclick="deleteFacility(${root.id})">🗑</button>
+        </div>
+      </div>
+      ${root.approval_no ? `<div class="fac-meta">批复文号：${escHtml(root.approval_no)}</div>` : ""}
+      ${root.end_date ? `<div class="fac-meta${rootOverdue ? " text-danger" : rootExpiring ? " text-warning" : ""}">有效期：${root.start_date || "—"} → ${root.end_date}${rootOverdue ? " ⚠️已到期" : rootExpiring ? " ⚠️即将到期" : ""}</div>` : ""}
+
+      <div class="fac-children">
+        ${children.map((sub) => renderSubFacility(sub, lines, today)).join("")}
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        ${["组合额度","特别授信额度","专项额度"].map((t) =>
+          `<button class="btn btn-outline btn-sm" style="font-size:11px;" onclick="showFacilityModal(null,${root.id},'${t}')">＋${t}</button>`
+        ).join("")}
+      </div>
+    </div>`;
+  }).join("") +
+  // 未关联批复的独立业务
+  (lines.filter((l) => !l.facility_id).length ? `
+    <div class="fac-root" style="margin-top:10px;">
+      <div class="fac-root-header"><span class="fac-type-tag" style="background:#f5f5f5;color:#666;">未关联批复的业务</span></div>
+      <div class="fac-children">
+        ${lines.filter((l) => !l.facility_id).map((l) => renderCreditLine(l, today)).join("")}
+      </div>
+      <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showCreditLineModal(null,null)">＋ 添加业务</button>
+    </div>` : "");
+}
+
+function renderSubFacility(fac, lines, today) {
+  const facLines = lines.filter((l) => l.facility_id === fac.id);
+  const used = facLines.filter((l) => l.status !== "已结清").reduce((s, l) => s + (l.used_amount || 0), 0);
+  const avail = (fac.approved_amount || 0) - used;
+  const expiring = fac.end_date && fac.end_date <= addDays(today, 30) && fac.end_date >= today;
+  const overdue  = fac.end_date && fac.end_date < today;
+  return `
+  <div class="fac-sub${overdue ? " fac-overdue" : expiring ? " fac-expiring" : ""}">
+    <div class="fac-sub-header">
+      <div>
+        <span class="fac-type-tag fac-sub-tag">${escHtml(fac.facility_type)}</span>
+        ${fac.name ? `<span class="fac-name">${escHtml(fac.name)}</span>` : ""}
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <span class="fac-amount" style="font-size:13px;">${fac.approved_amount || 0}万</span>
+        <button class="icon-btn" style="font-size:12px;" onclick="showFacilityModal(${JSON.stringify(fac).replace(/"/g,'&quot;')}, ${fac.parent_id})">✏️</button>
+        <button class="icon-btn" style="font-size:12px;color:var(--danger);" onclick="deleteFacility(${fac.id})">🗑</button>
+      </div>
+    </div>
+    <div class="fac-sub-amounts">
+      <span>已用 <strong>${used.toFixed(0)}万</strong></span>
+      <span>可用 <strong style="${avail < 0 ? "color:var(--danger)" : ""}">${avail.toFixed(0)}万</strong></span>
+      ${fac.end_date ? `<span class="${overdue ? "text-danger" : expiring ? "text-warning" : ""}">到期 ${fac.end_date}</span>` : ""}
+    </div>
+    ${facLines.map((l) => renderCreditLine(l, today)).join("")}
+    <button class="btn btn-outline btn-sm" style="margin-top:8px;width:100%;font-size:12px;" onclick="showCreditLineModal(null,${fac.id})">＋ 添加业务</button>
+  </div>`;
+}
+
+function renderCreditLine(l, today) {
+  const expiring = l.end_date && l.end_date <= addDays(today, 30) && l.end_date >= today && l.status !== "已结清";
+  const overdue  = l.end_date && l.end_date < today && l.status !== "已结清";
+  return `
+  <div class="cl-item${overdue ? " cl-overdue" : expiring ? " cl-expiring" : ""}">
+    <div class="cl-item-row">
+      <span class="cl-item-name">${escHtml(l.product_name)}</span>
+      <span class="risk-badge risk-${_riskCls(l.status)}">${escHtml(l.status)}</span>
+    </div>
+    <div class="cl-item-meta">
+      ${l.credit_type ? escHtml(l.credit_type) : ""}
+      ${l.credit_amount ? " · " + l.credit_amount + "万" : ""}
+      ${l.used_amount  ? " · 已用" + l.used_amount + "万" : ""}
+      ${l.interest_rate ? " · " + escHtml(l.interest_rate) : ""}
+      ${l.guarantee_type ? " · " + escHtml(l.guarantee_type) : ""}
+    </div>
+    ${l.end_date ? `<div class="cl-item-date${overdue ? " text-danger" : expiring ? " text-warning" : ""}">
+      ${l.start_date ? l.start_date + " → " : ""}到期 ${l.end_date}${overdue ? " ⚠️逾期" : expiring ? " ⚠️即将到期" : ""}
+    </div>` : ""}
+    ${l.notes ? `<div class="cl-notes">${escHtml(l.notes)}</div>` : ""}
+    <div class="cl-actions">
+      <button class="btn btn-outline btn-sm" onclick="editCreditLine(${l.id})">编辑</button>
+      <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="deleteCreditLine(${l.id})">删除</button>
+    </div>
+  </div>`;
+}
+
+// ── 授信设施 CRUD ──────────────────────────────────────────────────────────────
+
+function showFacilityModal(fac, parentId, defaultType) {
+  document.getElementById("facility-modal-title").textContent = fac ? "编辑授信批复" : "新增授信批复";
+  document.getElementById("edit-facility-id").value = fac ? fac.id : "";
+  document.getElementById("facility-parent-id").value = parentId != null ? parentId : (fac ? fac.parent_id || "" : "");
+  document.getElementById("fac-type").value = fac ? fac.facility_type : (defaultType || "最高控制额度");
+  document.getElementById("fac-amount").value = fac ? fac.approved_amount : "";
+  document.getElementById("fac-name").value = fac ? fac.name : "";
+  document.getElementById("fac-approval-no").value = fac ? fac.approval_no : "";
+  document.getElementById("fac-start-date").value = fac ? fac.start_date : "";
+  document.getElementById("fac-end-date").value = fac ? fac.end_date : "";
+  document.getElementById("fac-notes").value = fac ? fac.notes : "";
+  // 子额度类型不允许改为最高控制额度
+  const typeSelect = document.getElementById("fac-type");
+  const opt = typeSelect.querySelector('option[value="最高控制额度"]');
+  if (opt) opt.disabled = !!(parentId || (fac && fac.parent_id));
+  showModal("facility-modal");
+}
+
+async function saveFacility() {
+  const editId = document.getElementById("edit-facility-id").value;
+  const parentIdVal = document.getElementById("facility-parent-id").value;
+  const body = {
+    facility_type: document.getElementById("fac-type").value,
+    parent_id: parentIdVal ? parseInt(parentIdVal) : null,
+    name: document.getElementById("fac-name").value.trim(),
+    approved_amount: parseFloat(document.getElementById("fac-amount").value) || 0,
+    approval_no: document.getElementById("fac-approval-no").value.trim(),
+    start_date: document.getElementById("fac-start-date").value,
+    end_date: document.getElementById("fac-end-date").value,
+    notes: document.getElementById("fac-notes").value.trim(),
+  };
+  if (editId) {
+    await apiFetch(`/api/credit-facilities/${editId}`, { method: "PUT", body: JSON.stringify(body) });
+  } else {
+    await apiFetch(`/api/companies/${currentCompanyId}/credit-facilities`, { method: "POST", body: JSON.stringify(body) });
+  }
+  hideModal("facility-modal");
+  loadCreditLines();
+}
+
+async function deleteFacility(id) {
+  showConfirm("删除此额度及其下所有业务记录？", async () => {
+    await apiFetch(`/api/credit-facilities/${id}`, { method: "DELETE" });
+    loadCreditLines();
+  });
+}
+
+// ── 具体业务 CRUD ──────────────────────────────────────────────────────────────
+
+function showCreditLineModal(line, facilityId) {
+  document.getElementById("credit-line-modal-title").textContent = line ? "编辑业务" : "新增业务";
   document.getElementById("edit-credit-line-id").value = line ? line.id : "";
+  document.getElementById("cl-facility-id").value = line ? (line.facility_id || "") : (facilityId != null ? facilityId : "");
   document.getElementById("cl-product-name").value = line ? line.product_name : "";
   document.getElementById("cl-credit-type").value = line ? line.credit_type : "";
   document.getElementById("cl-status").value = line ? line.status : "正常";
@@ -2700,16 +2827,16 @@ function showCreditLineModal(line = null) {
   showModal("credit-line-modal");
 }
 
-async function editCreditLine(id) {
-  const res = await apiFetch(`/api/companies/${currentCompanyId}/credit-lines`);
-  const lines = await res.json();
-  const line = lines.find((l) => l.id === id);
-  if (line) showCreditLineModal(line);
+function editCreditLine(id) {
+  const line = _creditData.lines.find((l) => l.id === id);
+  if (line) showCreditLineModal(line, null);
 }
 
 async function saveCreditLine() {
   const editId = document.getElementById("edit-credit-line-id").value;
+  const facId  = document.getElementById("cl-facility-id").value;
   const body = {
+    facility_id: facId ? parseInt(facId) : null,
     product_name: document.getElementById("cl-product-name").value.trim(),
     credit_type: document.getElementById("cl-credit-type").value,
     status: document.getElementById("cl-status").value,
@@ -2721,7 +2848,7 @@ async function saveCreditLine() {
     guarantee_type: document.getElementById("cl-guarantee-type").value,
     notes: document.getElementById("cl-notes").value.trim(),
   };
-  if (!body.product_name) { alert("产品名称不能为空"); return; }
+  if (!body.product_name) { alert("业务名称不能为空"); return; }
   if (editId) {
     await apiFetch(`/api/credit-lines/${editId}`, { method: "PUT", body: JSON.stringify(body) });
   } else {
@@ -2732,7 +2859,7 @@ async function saveCreditLine() {
 }
 
 async function deleteCreditLine(id) {
-  showConfirm("删除此授信记录？", async () => {
+  showConfirm("删除此业务记录？", async () => {
     await apiFetch(`/api/credit-lines/${id}`, { method: "DELETE" });
     loadCreditLines();
   });

@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "62"
+APP_VERSION = "63"
 
 @app.get("/api/version")
 async def get_version():
@@ -569,7 +569,20 @@ def update_company_stage(company_id: int, body: dict):
 
 # ── 授信台账 ──────────────────────────────────────────────────────────────────
 
+FACILITY_TYPES = ["最高控制额度", "组合额度", "特别授信额度", "专项额度"]
+
+class CreditFacilityBody(BaseModel):
+    facility_type: str
+    parent_id: int | None = None
+    name: str = ""
+    approved_amount: float = 0
+    approval_no: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    notes: str = ""
+
 class CreditLineBody(BaseModel):
+    facility_id: int | None = None
     product_name: str
     credit_type: str = ""
     credit_amount: float = 0
@@ -581,11 +594,70 @@ class CreditLineBody(BaseModel):
     status: str = "正常"
     notes: str = ""
 
+# ── 授信设施（最高控制额度 / 组合 / 特别 / 专项）────────────────────────────
+
+@app.get("/api/companies/{company_id}/credit-facilities")
+def list_credit_facilities(company_id: int):
+    conn = get_db()
+    facs = [dict(r) for r in conn.execute(
+        "SELECT * FROM credit_facilities WHERE company_id=? ORDER BY created_at",
+        (company_id,)
+    ).fetchall()]
+    lines = [dict(r) for r in conn.execute(
+        "SELECT * FROM credit_lines WHERE company_id=? ORDER BY end_date, created_at DESC",
+        (company_id,)
+    ).fetchall()]
+    conn.close()
+    return {"facilities": facs, "lines": lines}
+
+@app.post("/api/companies/{company_id}/credit-facilities")
+def create_credit_facility(company_id: int, body: CreditFacilityBody):
+    if body.facility_type not in FACILITY_TYPES:
+        raise HTTPException(400, "无效的额度类型")
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO credit_facilities (company_id, facility_type, parent_id, name,
+             approved_amount, approval_no, start_date, end_date, notes)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (company_id, body.facility_type, body.parent_id, body.name,
+         body.approved_amount, body.approval_no, body.start_date, body.end_date, body.notes)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM credit_facilities WHERE id=?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+@app.put("/api/credit-facilities/{fac_id}")
+def update_credit_facility(fac_id: int, body: CreditFacilityBody):
+    conn = get_db()
+    conn.execute(
+        """UPDATE credit_facilities SET facility_type=?, parent_id=?, name=?,
+             approved_amount=?, approval_no=?, start_date=?, end_date=?, notes=?
+           WHERE id=?""",
+        (body.facility_type, body.parent_id, body.name,
+         body.approved_amount, body.approval_no, body.start_date, body.end_date, body.notes,
+         fac_id)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM credit_facilities WHERE id=?", (fac_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+@app.delete("/api/credit-facilities/{fac_id}")
+def delete_credit_facility(fac_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM credit_facilities WHERE id=?", (fac_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+# ── 具体业务 ──────────────────────────────────────────────────────────────────
+
 @app.get("/api/companies/{company_id}/credit-lines")
 def list_credit_lines(company_id: int):
     conn = get_db()
     rows = conn.execute(
-        "SELECT * FROM credit_lines WHERE company_id=? ORDER BY end_date, created_at DESC",
+        "SELECT * FROM credit_lines WHERE company_id=? ORDER BY facility_id, end_date, created_at DESC",
         (company_id,)
     ).fetchall()
     conn.close()
@@ -595,11 +667,13 @@ def list_credit_lines(company_id: int):
 def create_credit_line(company_id: int, body: CreditLineBody):
     conn = get_db()
     cur = conn.execute(
-        """INSERT INTO credit_lines (company_id, product_name, credit_type, credit_amount, used_amount,
-             interest_rate, guarantee_type, start_date, end_date, status, notes)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (company_id, body.product_name, body.credit_type, body.credit_amount, body.used_amount,
-         body.interest_rate, body.guarantee_type, body.start_date, body.end_date, body.status, body.notes)
+        """INSERT INTO credit_lines (company_id, facility_id, product_name, credit_type,
+             credit_amount, used_amount, interest_rate, guarantee_type,
+             start_date, end_date, status, notes)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (company_id, body.facility_id, body.product_name, body.credit_type,
+         body.credit_amount, body.used_amount, body.interest_rate, body.guarantee_type,
+         body.start_date, body.end_date, body.status, body.notes)
     )
     conn.commit()
     row = conn.execute("SELECT * FROM credit_lines WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -610,12 +684,13 @@ def create_credit_line(company_id: int, body: CreditLineBody):
 def update_credit_line(line_id: int, body: CreditLineBody):
     conn = get_db()
     conn.execute(
-        """UPDATE credit_lines SET product_name=?, credit_type=?, credit_amount=?, used_amount=?,
-             interest_rate=?, guarantee_type=?, start_date=?, end_date=?, status=?, notes=?
+        """UPDATE credit_lines SET facility_id=?, product_name=?, credit_type=?,
+             credit_amount=?, used_amount=?, interest_rate=?, guarantee_type=?,
+             start_date=?, end_date=?, status=?, notes=?
            WHERE id=?""",
-        (body.product_name, body.credit_type, body.credit_amount, body.used_amount,
-         body.interest_rate, body.guarantee_type, body.start_date, body.end_date, body.status, body.notes,
-         line_id)
+        (body.facility_id, body.product_name, body.credit_type,
+         body.credit_amount, body.used_amount, body.interest_rate, body.guarantee_type,
+         body.start_date, body.end_date, body.status, body.notes, line_id)
     )
     conn.commit()
     row = conn.execute("SELECT * FROM credit_lines WHERE id=?", (line_id,)).fetchone()

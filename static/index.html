@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1a3a6b">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-title" content="客户档案">
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
 <div id="app">
@@ -116,8 +116,8 @@
     <!-- 授信台账 -->
     <div id="tab-credit" style="display:none;">
       <div id="credit-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;"></div>
-      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="showCreditLineModal()">＋ 新增授信</button>
-      <div id="credit-lines-list"></div>
+      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="showFacilityModal(null,null)">＋ 新增授信批复</button>
+      <div id="credit-facilities-tree"></div>
     </div>
 
     <!-- 贷后检查 -->
@@ -645,19 +645,69 @@
   </div>
 
   <!-- ── 推送提醒 Modal ── -->
-  <!-- ── 授信台账 Modal ── -->
-  <div class="modal-overlay" id="credit-line-modal">
+  <!-- ── 授信设施 Modal（最高控制额度/组合/特别/专项） ── -->
+  <div class="modal-overlay" id="facility-modal">
     <div class="modal" style="max-height:88vh;overflow-y:auto;">
       <div class="modal-handle"></div>
-      <div class="modal-title" id="credit-line-modal-title">新增授信</div>
-      <input type="hidden" id="edit-credit-line-id">
+      <div class="modal-title" id="facility-modal-title">新增授信批复</div>
+      <input type="hidden" id="edit-facility-id">
+      <input type="hidden" id="facility-parent-id">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">额度类型 *</label>
+          <select class="form-select" id="fac-type">
+            <option value="最高控制额度">最高控制额度</option>
+            <option value="组合额度">组合额度</option>
+            <option value="特别授信额度">特别授信额度</option>
+            <option value="专项额度">专项额度</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">批复金额（万元）*</label>
+          <input class="form-input" id="fac-amount" type="number" placeholder="0">
+        </div>
+      </div>
       <div class="form-group">
-        <label class="form-label">产品名称 *</label>
-        <input class="form-input" id="cl-product-name" placeholder="如：流动资金贷款">
+        <label class="form-label">自定义名称</label>
+        <input class="form-input" id="fac-name" placeholder="如：2024年度综合授信（可不填）">
+      </div>
+      <div class="form-group">
+        <label class="form-label">批复文号</label>
+        <input class="form-input" id="fac-approval-no" placeholder="如：××银发[2024]001号">
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">授信品种</label>
+          <label class="form-label">批复日期</label>
+          <input class="form-input" id="fac-start-date" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">到期日期</label>
+          <input class="form-input" id="fac-end-date" type="date">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <textarea class="form-textarea" id="fac-notes" placeholder="特殊条件、备注..." rows="2"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="saveFacility()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('facility-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 具体业务 Modal ── -->
+  <div class="modal-overlay" id="credit-line-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="credit-line-modal-title">新增业务</div>
+      <input type="hidden" id="edit-credit-line-id">
+      <input type="hidden" id="cl-facility-id">
+      <div class="form-group">
+        <label class="form-label">业务名称 *</label>
+        <input class="form-input" id="cl-product-name" placeholder="如：2024年流动资金贷款1笔">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">业务品种</label>
           <select class="form-select" id="cl-credit-type">
             <option value="">请选择</option>
             <option>流动资金贷款</option>
@@ -665,7 +715,7 @@
             <option>承兑汇票</option>
             <option>信用证</option>
             <option>保函</option>
-            <option>综合授信</option>
+            <option>贸易融资</option>
             <option>其他</option>
           </select>
         </div>
@@ -681,21 +731,21 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">授信金额（万元）</label>
+          <label class="form-label">业务金额（万元）</label>
           <input class="form-input" id="cl-credit-amount" type="number" placeholder="0">
         </div>
         <div class="form-group">
-          <label class="form-label">已用额度（万元）</label>
+          <label class="form-label">已用余额（万元）</label>
           <input class="form-input" id="cl-used-amount" type="number" placeholder="0">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">授信起始日</label>
+          <label class="form-label">起始日</label>
           <input class="form-input" id="cl-start-date" type="date">
         </div>
         <div class="form-group">
-          <label class="form-label">授信到期日</label>
+          <label class="form-label">到期日</label>
           <input class="form-input" id="cl-end-date" type="date">
         </div>
       </div>
@@ -718,7 +768,7 @@
       </div>
       <div class="form-group">
         <label class="form-label">备注</label>
-        <textarea class="form-textarea" id="cl-notes" placeholder="还款计划、特别条款等..." rows="2"></textarea>
+        <textarea class="form-textarea" id="cl-notes" placeholder="还款安排、特别条款等..." rows="2"></textarea>
       </div>
       <button class="btn btn-primary" onclick="saveCreditLine()">保存</button>
       <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('credit-line-modal')">取消</button>
@@ -849,7 +899,7 @@
   <button class="fab" id="fab" onclick="showQuickAdd()">＋</button>
 
 </div>
-<script src="app.js?v=48"></script>
+<script src="app.js?v=49"></script>
 <script>
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
