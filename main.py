@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "64"
+APP_VERSION = "65"
 
 @app.get("/api/version")
 async def get_version():
@@ -571,9 +571,13 @@ def update_company_stage(company_id: int, body: dict):
 
 FACILITY_TYPES = ["最高控制额度", "组合额度", "特别授信额度", "专项额度"]
 
+APPROVAL_TYPES = ["原始授信", "授信变更", "额度续授", "额度压缩"]
+
 class CreditFacilityBody(BaseModel):
     facility_type: str
     parent_id: int | None = None
+    approval_type: str = "原始授信"
+    parent_approval_id: int | None = None
     name: str = ""
     approved_amount: float = 0
     approval_no: str = ""
@@ -615,11 +619,18 @@ def create_credit_facility(company_id: int, body: CreditFacilityBody):
     if body.facility_type not in FACILITY_TYPES:
         raise HTTPException(400, "无效的额度类型")
     conn = get_db()
+    # 若是新变更批复（最高控制额度级别），将原批复标为已变更
+    if body.facility_type == "最高控制额度" and body.parent_approval_id:
+        conn.execute(
+            "UPDATE credit_facilities SET is_active=0 WHERE id=?",
+            (body.parent_approval_id,)
+        )
     cur = conn.execute(
-        """INSERT INTO credit_facilities (company_id, facility_type, parent_id, name,
-             approved_amount, approval_no, start_date, end_date, notes)
-           VALUES (?,?,?,?,?,?,?,?,?)""",
-        (company_id, body.facility_type, body.parent_id, body.name,
+        """INSERT INTO credit_facilities (company_id, facility_type, parent_id, approval_type,
+             parent_approval_id, name, approved_amount, approval_no, start_date, end_date, notes, is_active)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,1)""",
+        (company_id, body.facility_type, body.parent_id, body.approval_type,
+         body.parent_approval_id, body.name,
          body.approved_amount, body.approval_no, body.start_date, body.end_date, body.notes)
     )
     conn.commit()
@@ -631,10 +642,12 @@ def create_credit_facility(company_id: int, body: CreditFacilityBody):
 def update_credit_facility(fac_id: int, body: CreditFacilityBody):
     conn = get_db()
     conn.execute(
-        """UPDATE credit_facilities SET facility_type=?, parent_id=?, name=?,
-             approved_amount=?, approval_no=?, start_date=?, end_date=?, notes=?
+        """UPDATE credit_facilities SET facility_type=?, parent_id=?, approval_type=?,
+             parent_approval_id=?, name=?, approved_amount=?, approval_no=?,
+             start_date=?, end_date=?, notes=?
            WHERE id=?""",
-        (body.facility_type, body.parent_id, body.name,
+        (body.facility_type, body.parent_id, body.approval_type,
+         body.parent_approval_id, body.name,
          body.approved_amount, body.approval_no, body.start_date, body.end_date, body.notes,
          fac_id)
     )
@@ -642,6 +655,24 @@ def update_credit_facility(fac_id: int, body: CreditFacilityBody):
     row = conn.execute("SELECT * FROM credit_facilities WHERE id=?", (fac_id,)).fetchone()
     conn.close()
     return dict(row)
+
+@app.patch("/api/credit-facilities/{fac_id}/activate")
+def activate_credit_facility(fac_id: int):
+    """将某批复设为有效，同批次其他最高控制额度设为已变更。"""
+    conn = get_db()
+    row = conn.execute("SELECT * FROM credit_facilities WHERE id=?", (fac_id,)).fetchone()
+    if not row:
+        raise HTTPException(404)
+    if row["facility_type"] == "最高控制额度":
+        conn.execute(
+            """UPDATE credit_facilities SET is_active=0
+               WHERE company_id=? AND facility_type='最高控制额度' AND id!=?""",
+            (row["company_id"], fac_id)
+        )
+    conn.execute("UPDATE credit_facilities SET is_active=1 WHERE id=?", (fac_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 @app.delete("/api/credit-facilities/{fac_id}")
 def delete_credit_facility(fac_id: int):
@@ -759,7 +790,9 @@ CREDIT_EXTRACT_PROMPT = """你是银行信贷助手，负责从授信批复文�
 """
 
 @app.post("/api/companies/{company_id}/credit-facilities/extract-pdf")
-async def extract_credit_pdf(company_id: int, file: UploadFile = File(...)):
+async def extract_credit_pdf(company_id: int, file: UploadFile = File(...),
+                              approval_type: str = "原始授信",
+                              parent_approval_id: str = ""):
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(400, "请上传PDF文件")
     content = await file.read()
@@ -780,6 +813,8 @@ async def extract_credit_pdf(company_id: int, file: UploadFile = File(...)):
         # 清理可能的代码块标记
         reply = re.sub(r"```(?:json)?", "", reply).strip().strip("`").strip()
         data = json.loads(reply)
+        data["_approval_type"] = approval_type
+        data["_parent_approval_id"] = int(parent_approval_id) if parent_approval_id.isdigit() else None
         return data
     except json.JSONDecodeError:
         raise HTTPException(500, "AI返回格式异常，请重试或手动录入")

@@ -62,7 +62,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "64";
+const CLIENT_VERSION = "65";
 
 async function checkVersion() {
   try {
@@ -2621,6 +2621,8 @@ async function handleCreditPdfUpload(input) {
   const file = input.files[0];
   if (!file) return;
   input.value = "";
+  const approvalType = document.getElementById("pdf-approval-type")?.value || "原始授信";
+  const parentApprovalId = document.getElementById("pdf-parent-approval")?.value || "";
   const btn = document.getElementById("credit-pdf-btn");
   const orig = btn.textContent;
   btn.textContent = "AI解析中…";
@@ -2628,9 +2630,10 @@ async function handleCreditPdfUpload(input) {
   try {
     const fd = new FormData();
     fd.append("file", file);
-    const res = await apiFetch(`/api/companies/${currentCompanyId}/credit-facilities/extract-pdf`, {
-      method: "POST", body: fd,
-    });
+    const url = `/api/companies/${currentCompanyId}/credit-facilities/extract-pdf`
+      + `?approval_type=${encodeURIComponent(approvalType)}`
+      + (parentApprovalId ? `&parent_approval_id=${parentApprovalId}` : "");
+    const res = await apiFetch(url, { method: "POST", body: fd });
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: "解析失败" }));
       alert("解析失败：" + (err.detail || "未知错误"));
@@ -2683,6 +2686,8 @@ async function confirmCreditPdfImport() {
       body: JSON.stringify({
         facility_type: "最高控制额度",
         parent_id: null,
+        approval_type: data._approval_type || "原始授信",
+        parent_approval_id: data._parent_approval_id || null,
         approved_amount: data.max_amount || 0,
         approval_no: data.approval_no || "",
         start_date: data.start_date || "",
@@ -2752,73 +2757,102 @@ async function loadCreditLines() {
   renderCreditTree(_creditData);
 }
 
+function _approvalTypeBadge(type) {
+  const colors = {
+    "原始授信":  "background:#e8f5e9;color:#2e7d32",
+    "授信变更":  "background:#fff3e0;color:#e65100",
+    "额度续授":  "background:#e3f2fd;color:#1565c0",
+    "额度压缩":  "background:#fce4ec;color:#ad1457",
+  };
+  const s = colors[type] || "";
+  return `<span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px;${s}">${escHtml(type||"原始授信")}</span>`;
+}
+
 function renderCreditTree({ facilities, lines }) {
   const today = todayISO();
   const summary = document.getElementById("credit-summary");
   const tree = document.getElementById("credit-facilities-tree");
 
-  // 顶部汇总：所有有效业务
-  const activeLines = lines.filter((l) => l.status !== "已结清");
+  // 顶部汇总：当前有效批复下的业务
+  const roots   = facilities.filter((f) => f.facility_type === "最高控制额度");
+  const activeRoot = roots.find((r) => r.is_active) || roots[0];
+  const activeFacIds = activeRoot
+    ? new Set([activeRoot.id, ...facilities.filter((f) => f.parent_id === activeRoot.id).map((f) => f.id)])
+    : new Set();
+  const activeLines = lines.filter((l) => activeFacIds.has(l.facility_id) && l.status !== "已结清");
   const totalCredit = activeLines.reduce((s, l) => s + (l.credit_amount || 0), 0);
   const totalUsed   = activeLines.reduce((s, l) => s + (l.used_amount   || 0), 0);
   summary.innerHTML = [
-    ["授信总额", totalCredit.toFixed(0) + "万"],
+    ["当前授信", (activeRoot ? activeRoot.approved_amount || 0 : 0) + "万"],
     ["已用余额", totalUsed.toFixed(0) + "万"],
-    ["可用额度", (totalCredit - totalUsed).toFixed(0) + "万"],
+    ["可用额度", ((activeRoot ? activeRoot.approved_amount || 0 : 0) - totalUsed).toFixed(0) + "万"],
   ].map(([l, v]) => `<div class="credit-stat-card"><div class="credit-stat-val">${v}</div><div class="credit-stat-lbl">${l}</div></div>`).join("");
 
   if (!facilities.length) {
-    tree.innerHTML = '<div class="empty"><div class="empty-icon">💳</div><p>暂无授信记录</p><p style="font-size:13px;margin-top:6px;">点击「＋新增授信批复」录入</p></div>';
+    tree.innerHTML = '<div class="empty"><div class="empty-icon">💳</div><p>暂无授信记录</p><p style="font-size:13px;margin-top:6px;">点击「＋手动录入」或「上传批复PDF」</p></div>';
     return;
   }
 
-  // 最高控制额度为根节点，其余为子节点
-  const roots   = facilities.filter((f) => f.facility_type === "最高控制额度");
   const subs    = facilities.filter((f) => f.facility_type !== "最高控制额度");
   const orphans = subs.filter((f) => !facilities.find((r) => r.id === f.parent_id));
 
-  const allRoots = [...roots, ...orphans];
+  // 按时间倒序排列：新批复在上
+  const sortedRoots = [...roots].sort((a, b) => b.id - a.id);
 
-  tree.innerHTML = allRoots.map((root) => {
+  tree.innerHTML = sortedRoots.map((root) => {
+    const isActive = root.is_active;
     const children = subs.filter((f) => f.parent_id === root.id);
     const rootExpiring = root.end_date && root.end_date <= addDays(today, 90) && root.end_date >= today;
     const rootOverdue  = root.end_date && root.end_date < today;
+    const collapsed = !isActive;
+    const collapseId = `fac-collapse-${root.id}`;
     return `
-    <div class="fac-root${rootOverdue ? " fac-overdue" : rootExpiring ? " fac-expiring" : ""}">
-      <div class="fac-root-header">
-        <div>
-          <span class="fac-type-tag">${escHtml(root.facility_type)}</span>
+    <div class="fac-root${!isActive ? " fac-historical" : rootOverdue ? " fac-overdue" : rootExpiring ? " fac-expiring" : ""}">
+      <div class="fac-root-header" onclick="toggleFacCollapse('${collapseId}')" style="cursor:pointer;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          ${isActive ? '<span class="fac-active-badge">当前有效</span>' : '<span class="fac-inactive-badge">已变更</span>'}
+          ${_approvalTypeBadge(root.approval_type)}
           ${root.name ? `<span class="fac-name">${escHtml(root.name)}</span>` : ""}
         </div>
         <div style="display:flex;align-items:center;gap:6px;">
-          <span class="fac-amount">${root.approved_amount || 0}万</span>
-          <button class="icon-btn" style="font-size:13px;" onclick="showFacilityModal(${JSON.stringify(root).replace(/"/g,'&quot;')}, null)">✏️</button>
-          <button class="icon-btn" style="font-size:13px;color:var(--danger);" onclick="deleteFacility(${root.id})">🗑</button>
+          <span class="fac-amount${!isActive ? " fac-amount-dim" : ""}">${root.approved_amount || 0}万</span>
+          ${!isActive ? `<button class="btn btn-outline btn-sm" style="font-size:11px;" onclick="event.stopPropagation();activateFacility(${root.id})">设为有效</button>` : ""}
+          <button class="icon-btn" style="font-size:12px;" onclick="event.stopPropagation();showFacilityModal(${JSON.stringify(root).replace(/"/g,'&quot;')}, null)">✏️</button>
+          <button class="icon-btn" style="font-size:12px;color:var(--danger);" onclick="event.stopPropagation();deleteFacility(${root.id})">🗑</button>
         </div>
       </div>
-      ${root.approval_no ? `<div class="fac-meta">批复文号：${escHtml(root.approval_no)}</div>` : ""}
-      ${root.end_date ? `<div class="fac-meta${rootOverdue ? " text-danger" : rootExpiring ? " text-warning" : ""}">有效期：${root.start_date || "—"} → ${root.end_date}${rootOverdue ? " ⚠️已到期" : rootExpiring ? " ⚠️即将到期" : ""}</div>` : ""}
-
-      <div class="fac-children">
-        ${children.map((sub) => renderSubFacility(sub, lines, today)).join("")}
+      <div class="fac-root-meta">
+        ${root.approval_no ? `<span>文号：${escHtml(root.approval_no)}</span>` : ""}
+        ${root.end_date ? `<span class="${rootOverdue ? "text-danger" : rootExpiring ? "text-warning" : ""}">有效期：${root.start_date || "—"} → ${root.end_date}${rootOverdue ? " ⚠️" : rootExpiring ? " ⏰" : ""}</span>` : ""}
       </div>
-
-      <div style="display:flex;gap:8px;margin-top:10px;">
-        ${["组合额度","特别授信额度","专项额度"].map((t) =>
-          `<button class="btn btn-outline btn-sm" style="font-size:11px;" onclick="showFacilityModal(null,${root.id},'${t}')">＋${t}</button>`
-        ).join("")}
+      <div id="${collapseId}" class="fac-collapse-body" style="${collapsed ? "display:none" : ""}">
+        <div class="fac-children">
+          ${children.map((sub) => renderSubFacility(sub, lines, today)).join("")}
+        </div>
+        ${isActive ? `<div style="display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;">
+          ${["组合额度","特别授信额度","专项额度"].map((t) =>
+            `<button class="btn btn-outline btn-sm" style="font-size:11px;" onclick="showFacilityModal(null,${root.id},'${t}')">＋${t}</button>`
+          ).join("")}
+        </div>` : ""}
       </div>
     </div>`;
   }).join("") +
-  // 未关联批复的独立业务
-  (lines.filter((l) => !l.facility_id).length ? `
-    <div class="fac-root" style="margin-top:10px;">
+  (orphans.length ? `
+    <div class="fac-root" style="margin-top:8px;">
       <div class="fac-root-header"><span class="fac-type-tag" style="background:#f5f5f5;color:#666;">未关联批复的业务</span></div>
-      <div class="fac-children">
-        ${lines.filter((l) => !l.facility_id).map((l) => renderCreditLine(l, today)).join("")}
-      </div>
+      <div class="fac-children">${orphans.flatMap((f) => lines.filter((l) => l.facility_id === f.id)).map((l) => renderCreditLine(l, today)).join("")}</div>
+    </div>` : "") +
+  (lines.filter((l) => !l.facility_id).length ? `
+    <div class="fac-root" style="margin-top:8px;">
+      <div class="fac-root-header"><span class="fac-type-tag" style="background:#f5f5f5;color:#666;">未关联具体业务</span></div>
+      <div class="fac-children">${lines.filter((l) => !l.facility_id).map((l) => renderCreditLine(l, today)).join("")}</div>
       <button class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="showCreditLineModal(null,null)">＋ 添加业务</button>
     </div>` : "");
+}
+
+function toggleFacCollapse(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = el.style.display === "none" ? "" : "none";
 }
 
 function renderSubFacility(fac, lines, today) {
@@ -2879,30 +2913,55 @@ function renderCreditLine(l, today) {
 
 // ── 授信设施 CRUD ──────────────────────────────────────────────────────────────
 
+function onFacTypeChange() {
+  const isRoot = document.getElementById("fac-type").value === "最高控制额度";
+  document.getElementById("fac-approval-type-row").style.display = isRoot ? "" : "none";
+  onFacApprovalTypeChange();
+}
+
+function onFacApprovalTypeChange() {
+  const type = document.getElementById("fac-approval-type").value;
+  const needParent = ["授信变更","额度续授","额度压缩"].includes(type);
+  const grp = document.getElementById("fac-parent-approval-group");
+  grp.style.display = needParent ? "" : "none";
+  if (needParent) {
+    const sel = document.getElementById("fac-parent-approval-id");
+    sel.innerHTML = '<option value="">请选择原批复</option>' +
+      _creditData.facilities.filter((f) => f.facility_type === "最高控制额度")
+        .map((f) => `<option value="${f.id}">${escHtml(f.approval_no || f.start_date || "批复#" + f.id)} ${f.approved_amount||0}万</option>`)
+        .join("");
+  }
+}
+
 function showFacilityModal(fac, parentId, defaultType) {
   document.getElementById("facility-modal-title").textContent = fac ? "编辑授信批复" : "新增授信批复";
   document.getElementById("edit-facility-id").value = fac ? fac.id : "";
   document.getElementById("facility-parent-id").value = parentId != null ? parentId : (fac ? fac.parent_id || "" : "");
-  document.getElementById("fac-type").value = fac ? fac.facility_type : (defaultType || "最高控制额度");
+  const facType = fac ? fac.facility_type : (defaultType || "最高控制额度");
+  document.getElementById("fac-type").value = facType;
   document.getElementById("fac-amount").value = fac ? fac.approved_amount : "";
   document.getElementById("fac-name").value = fac ? fac.name : "";
   document.getElementById("fac-approval-no").value = fac ? fac.approval_no : "";
   document.getElementById("fac-start-date").value = fac ? fac.start_date : "";
   document.getElementById("fac-end-date").value = fac ? fac.end_date : "";
   document.getElementById("fac-notes").value = fac ? fac.notes : "";
-  // 子额度类型不允许改为最高控制额度
-  const typeSelect = document.getElementById("fac-type");
-  const opt = typeSelect.querySelector('option[value="最高控制额度"]');
+  document.getElementById("fac-approval-type").value = fac ? (fac.approval_type || "原始授信") : "原始授信";
+  const opt = document.getElementById("fac-type").querySelector('option[value="最高控制额度"]');
   if (opt) opt.disabled = !!(parentId || (fac && fac.parent_id));
+  onFacTypeChange();
   showModal("facility-modal");
 }
 
 async function saveFacility() {
   const editId = document.getElementById("edit-facility-id").value;
   const parentIdVal = document.getElementById("facility-parent-id").value;
+  const approvalType = document.getElementById("fac-approval-type").value;
+  const parentApprovalIdVal = document.getElementById("fac-parent-approval-id").value;
   const body = {
     facility_type: document.getElementById("fac-type").value,
     parent_id: parentIdVal ? parseInt(parentIdVal) : null,
+    approval_type: approvalType,
+    parent_approval_id: parentApprovalIdVal ? parseInt(parentApprovalIdVal) : null,
     name: document.getElementById("fac-name").value.trim(),
     approved_amount: parseFloat(document.getElementById("fac-amount").value) || 0,
     approval_no: document.getElementById("fac-approval-no").value.trim(),
@@ -2919,11 +2978,42 @@ async function saveFacility() {
   loadCreditLines();
 }
 
+async function activateFacility(id) {
+  await apiFetch(`/api/credit-facilities/${id}/activate`, { method: "PATCH" });
+  loadCreditLines();
+}
+
 async function deleteFacility(id) {
-  showConfirm("删除此额度及其下所有业务记录？", async () => {
+  showConfirm("删除此批复及其下所有子额度和业务记录？", async () => {
     await apiFetch(`/api/credit-facilities/${id}`, { method: "DELETE" });
     loadCreditLines();
   });
+}
+
+// ── PDF上传——先选批复类型 ────────────────────────────────────────────────────
+
+function showCreditPdfUploadModal() {
+  document.getElementById("pdf-approval-type").value = "原始授信";
+  onPdfApprovalTypeChange();
+  showModal("credit-pdf-type-modal");
+}
+
+function onPdfApprovalTypeChange() {
+  const type = document.getElementById("pdf-approval-type").value;
+  const needParent = ["授信变更","额度续授","额度压缩"].includes(type);
+  document.getElementById("pdf-parent-group").style.display = needParent ? "" : "none";
+  if (needParent) {
+    const sel = document.getElementById("pdf-parent-approval");
+    sel.innerHTML = '<option value="">请选择原批复</option>' +
+      _creditData.facilities.filter((f) => f.facility_type === "最高控制额度")
+        .map((f) => `<option value="${f.id}">${escHtml(f.approval_no || f.start_date || "批复#" + f.id)} ${f.approved_amount||0}万</option>`)
+        .join("");
+  }
+}
+
+function triggerCreditPdfFile() {
+  hideModal("credit-pdf-type-modal");
+  document.getElementById("credit-pdf-input").click();
 }
 
 // ── 具体业务 CRUD ──────────────────────────────────────────────────────────────

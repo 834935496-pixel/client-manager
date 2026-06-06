@@ -268,6 +268,16 @@ def _init_credit_lines(conn):
     if "facility_id" not in cl_cols:
         conn.execute("ALTER TABLE credit_lines ADD COLUMN facility_id INTEGER")
 
+    # 迁移：为 credit_facilities 补充批复变更追踪字段
+    fac_cols = {r[1] for r in conn.execute("PRAGMA table_info(credit_facilities)").fetchall()}
+    for col, defn in [
+        ("approval_type",      "TEXT DEFAULT '原始授信'"),
+        ("parent_approval_id", "INTEGER"),
+        ("is_active",          "INTEGER DEFAULT 1"),
+    ]:
+        if col not in fac_cols:
+            conn.execute(f"ALTER TABLE credit_facilities ADD COLUMN {col} {defn}")
+
     conn.commit()
 
 
