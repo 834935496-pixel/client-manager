@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "63"
+APP_VERSION = "64"
 
 @app.get("/api/version")
 async def get_version():
@@ -720,6 +720,76 @@ def expiring_credit_lines(days: int = 30):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+CREDIT_EXTRACT_PROMPT = """你是银行信贷助手，负责从授信批复文件中提取结构化信息。
+
+请从以下文本中提取授信批复的完整内容，严格按JSON格式返回，不加任何说明：
+
+{
+  "approval_no": "批复文号，如××银发[2024]001号",
+  "max_amount": 最高控制额度数字（万元，纯数字），
+  "start_date": "生效日期YYYY-MM-DD",
+  "end_date": "到期日期YYYY-MM-DD",
+  "facilities": [
+    {
+      "facility_type": "组合额度 或 特别授信额度 或 专项额度",
+      "name": "额度名称（如有，否则空字符串）",
+      "approved_amount": 额度金额（万元，纯数字）,
+      "products": [
+        {
+          "product_name": "业务名称",
+          "credit_type": "业务品种，如流动资金贷款/固定资产贷款/承兑汇票/信用证/保函/贸易融资",
+          "credit_amount": 业务金额（万元，纯数字），
+          "guarantee_type": "担保方式，如信用/抵押/质押/保证/抵押+保证",
+          "interest_rate": "利率表述，如LPR+50BP或4.35%"
+        }
+      ]
+    }
+  ]
+}
+
+注意：
+- 若文中没有明确区分子额度类型，所有业务放入一个"组合额度"下
+- 金额统一转为万元，纯数字
+- 日期统一为YYYY-MM-DD格式
+- 只返回JSON，不加任何说明和markdown代码块
+
+文档内容：
+"""
+
+@app.post("/api/companies/{company_id}/credit-facilities/extract-pdf")
+async def extract_credit_pdf(company_id: int, file: UploadFile = File(...)):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "请上传PDF文件")
+    content = await file.read()
+    tmp_path = UPLOAD_DIR / f"_tmp_credit_{uuid.uuid4().hex}.pdf"
+    tmp_path.write_bytes(content)
+    try:
+        text = await _extract_text_hybrid_pdf(tmp_path, max_pages=30)
+        if not text.strip():
+            raise HTTPException(400, "PDF无法提取文字，请确认文件完整")
+
+        api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        base_url = os.getenv("DEEPSEEK_BASE_URL", "")
+        if not api_key:
+            raise HTTPException(400, "未配置AI接口，无法解析")
+
+        import re
+        reply = chat([{"role": "user", "content": CREDIT_EXTRACT_PROMPT + text[:8000]}], mode="cloud")
+        # 清理可能的代码块标记
+        reply = re.sub(r"```(?:json)?", "", reply).strip().strip("`").strip()
+        data = json.loads(reply)
+        return data
+    except json.JSONDecodeError:
+        raise HTTPException(500, "AI返回格式异常，请重试或手动录入")
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        raise HTTPException(500, f"提取失败：{e}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 # ── 贷后检查 ──────────────────────────────────────────────────────────────────

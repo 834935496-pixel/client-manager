@@ -62,7 +62,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "63";
+const CLIENT_VERSION = "64";
 
 async function checkVersion() {
   try {
@@ -2615,6 +2615,124 @@ async function _saveEquityNode() {
 // ── 授信台账 ──────────────────────────────────────────────────────────────────
 
 let _creditData = { facilities: [], lines: [] };
+let _creditPdfResult = null;
+
+async function handleCreditPdfUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = "";
+  const btn = document.getElementById("credit-pdf-btn");
+  const orig = btn.textContent;
+  btn.textContent = "AI解析中…";
+  btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await apiFetch(`/api/companies/${currentCompanyId}/credit-facilities/extract-pdf`, {
+      method: "POST", body: fd,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: "解析失败" }));
+      alert("解析失败：" + (err.detail || "未知错误"));
+      return;
+    }
+    _creditPdfResult = await res.json();
+    renderCreditPdfPreview(_creditPdfResult);
+    showModal("credit-pdf-preview-modal");
+  } catch (e) {
+    alert("上传失败：" + e.message);
+  } finally {
+    btn.textContent = orig;
+    btn.disabled = false;
+  }
+}
+
+function renderCreditPdfPreview(data) {
+  const el = document.getElementById("credit-pdf-preview-content");
+  const fmtAmt = (v) => v ? `${v}万元` : "—";
+  el.innerHTML = `
+    <div class="pdf-preview-section">
+      <div class="pdf-preview-row"><span class="pdf-label">批复文号</span><span>${escHtml(data.approval_no || "—")}</span></div>
+      <div class="pdf-preview-row"><span class="pdf-label">最高控制额度</span><span style="font-weight:700;color:var(--primary);">${fmtAmt(data.max_amount)}</span></div>
+      <div class="pdf-preview-row"><span class="pdf-label">有效期</span><span>${data.start_date || "—"} → ${data.end_date || "—"}</span></div>
+    </div>
+    ${(data.facilities || []).map((fac) => `
+    <div class="pdf-preview-fac">
+      <div class="pdf-fac-header">
+        <span class="fac-type-tag">${escHtml(fac.facility_type)}</span>
+        <strong>${fmtAmt(fac.approved_amount)}</strong>
+      </div>
+      ${(fac.products || []).map((p) => `
+        <div class="pdf-product-row">
+          <span class="pdf-prod-name">${escHtml(p.product_name)}</span>
+          <span class="pdf-prod-meta">${[p.credit_type, fmtAmt(p.credit_amount), p.guarantee_type, p.interest_rate].filter(Boolean).join(" · ")}</span>
+        </div>`).join("")}
+    </div>`).join("")}`;
+}
+
+async function confirmCreditPdfImport() {
+  const data = _creditPdfResult;
+  if (!data) return;
+  const btn = document.getElementById("credit-pdf-confirm-btn");
+  btn.textContent = "导入中…";
+  btn.disabled = true;
+  try {
+    // 创建最高控制额度
+    const rootRes = await apiFetch(`/api/companies/${currentCompanyId}/credit-facilities`, {
+      method: "POST",
+      body: JSON.stringify({
+        facility_type: "最高控制额度",
+        parent_id: null,
+        approved_amount: data.max_amount || 0,
+        approval_no: data.approval_no || "",
+        start_date: data.start_date || "",
+        end_date: data.end_date || "",
+      }),
+    });
+    const root = await rootRes.json();
+
+    // 依次创建子额度及其业务
+    for (const fac of (data.facilities || [])) {
+      const subRes = await apiFetch(`/api/companies/${currentCompanyId}/credit-facilities`, {
+        method: "POST",
+        body: JSON.stringify({
+          facility_type: fac.facility_type || "组合额度",
+          parent_id: root.id,
+          name: fac.name || "",
+          approved_amount: fac.approved_amount || 0,
+          start_date: data.start_date || "",
+          end_date: data.end_date || "",
+        }),
+      });
+      const sub = await subRes.json();
+      for (const p of (fac.products || [])) {
+        await apiFetch(`/api/companies/${currentCompanyId}/credit-lines`, {
+          method: "POST",
+          body: JSON.stringify({
+            facility_id: sub.id,
+            product_name: p.product_name || "业务",
+            credit_type: p.credit_type || "",
+            credit_amount: p.credit_amount || 0,
+            used_amount: 0,
+            interest_rate: p.interest_rate || "",
+            guarantee_type: p.guarantee_type || "",
+            start_date: data.start_date || "",
+            end_date: data.end_date || "",
+            status: "正常",
+          }),
+        });
+      }
+    }
+    hideModal("credit-pdf-preview-modal");
+    _creditPdfResult = null;
+    loadCreditLines();
+  } catch (e) {
+    alert("导入失败：" + e.message);
+  } finally {
+    btn.textContent = "确认导入";
+    btn.disabled = false;
+  }
+}
 
 function addDays(dateStr, days) {
   const d = new Date(dateStr);

@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1a3a6b">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-title" content="客户档案">
-<link rel="stylesheet" href="style.css?v=18">
+<link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
 <div id="app">
@@ -116,7 +116,11 @@
     <!-- 授信台账 -->
     <div id="tab-credit" style="display:none;">
       <div id="credit-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;"></div>
-      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="showFacilityModal(null,null)">＋ 新增授信批复</button>
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn btn-primary btn-sm" style="flex:1;" onclick="showFacilityModal(null,null)">＋ 手动录入</button>
+        <button class="btn btn-outline btn-sm" style="flex:1;color:var(--primary);border-color:var(--primary);" onclick="document.getElementById('credit-pdf-input').click()" id="credit-pdf-btn">📄 上传批复PDF</button>
+        <input type="file" id="credit-pdf-input" accept=".pdf" style="display:none" onchange="handleCreditPdfUpload(this)">
+      </div>
       <div id="credit-facilities-tree"></div>
     </div>
 
@@ -645,6 +649,18 @@
   </div>
 
   <!-- ── 推送提醒 Modal ── -->
+  <!-- ── 授信批复PDF预览 Modal ── -->
+  <div class="modal-overlay" id="credit-pdf-preview-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title">📄 授信批复识别结果</div>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">请核对以下信息，确认后将自动创建授信台账层级</p>
+      <div id="credit-pdf-preview-content"></div>
+      <button class="btn btn-primary" onclick="confirmCreditPdfImport()" id="credit-pdf-confirm-btn">确认导入</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('credit-pdf-preview-modal')">取消</button>
+    </div>
+  </div>
+
   <!-- ── 授信设施 Modal（最高控制额度/组合/特别/专项） ── -->
   <div class="modal-overlay" id="facility-modal">
     <div class="modal" style="max-height:88vh;overflow-y:auto;">
@@ -899,7 +915,7 @@
   <button class="fab" id="fab" onclick="showQuickAdd()">＋</button>
 
 </div>
-<script src="app.js?v=49"></script>
+<script src="app.js?v=50"></script>
 <script>
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});
