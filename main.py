@@ -52,7 +52,7 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-APP_VERSION = "61"
+APP_VERSION = "62"
 
 @app.get("/api/version")
 async def get_version():
@@ -163,6 +163,8 @@ class CompanyBody(BaseModel):
     name: str
     industry: str = ""
     level: str = "B"
+    business_stage: str = "意向客户"
+    last_visit_date: str = ""
     credit_limit: float = 0
     products: list = []
     tags: list = []
@@ -209,12 +211,14 @@ def list_companies(q: str = ""):
 def create_company(body: CompanyBody):
     conn = get_db()
     cur = conn.execute(
-        """INSERT INTO companies (name, industry, level, credit_limit, products, tags, notes,
+        """INSERT INTO companies (name, industry, level, business_stage, last_visit_date,
+             credit_limit, products, tags, notes,
              legal_rep, legal_rep_id, credit_code, reg_capital, established_date, reg_address, biz_scope,
              company_scale, office_address, employee_count, operating_scope,
              products_assets, products_liabilities, products_intermediary)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (body.name, body.industry, body.level, body.credit_limit,
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (body.name, body.industry, body.level, body.business_stage, body.last_visit_date,
+         body.credit_limit,
          json.dumps(body.products, ensure_ascii=False),
          json.dumps(body.tags, ensure_ascii=False), body.notes,
          body.legal_rep, body.legal_rep_id, body.credit_code, body.reg_capital,
@@ -244,12 +248,14 @@ def get_company(company_id: int):
 def update_company(company_id: int, body: CompanyBody):
     conn = get_db()
     conn.execute(
-        """UPDATE companies SET name=?, industry=?, level=?, credit_limit=?, products=?, tags=?, notes=?,
+        """UPDATE companies SET name=?, industry=?, level=?, business_stage=?, last_visit_date=?,
+             credit_limit=?, products=?, tags=?, notes=?,
              legal_rep=?, legal_rep_id=?, credit_code=?, reg_capital=?, established_date=?, reg_address=?, biz_scope=?,
              company_scale=?, office_address=?, employee_count=?, operating_scope=?,
              products_assets=?, products_liabilities=?, products_intermediary=?,
              updated_at=datetime('now','localtime') WHERE id=?""",
-        (body.name, body.industry, body.level, body.credit_limit,
+        (body.name, body.industry, body.level, body.business_stage, body.last_visit_date,
+         body.credit_limit,
          json.dumps(body.products, ensure_ascii=False),
          json.dumps(body.tags, ensure_ascii=False), body.notes,
          body.legal_rep, body.legal_rep_id, body.credit_code, body.reg_capital,
@@ -526,6 +532,181 @@ def expiring_products(days: int = 30):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ── Pipeline 看板 ────────────────────────────────────────────────────────────
+
+PIPELINE_STAGES = ["意向客户", "授信申请中", "已授信", "用信中", "贷后管理", "已结清"]
+
+@app.get("/api/pipeline")
+def get_pipeline():
+    conn = get_db()
+    result = {}
+    for stage in PIPELINE_STAGES:
+        rows = conn.execute(
+            """SELECT c.id, c.name, c.industry, c.level, c.business_stage, c.last_visit_date,
+               (SELECT name FROM contacts WHERE company_id=c.id AND is_primary=1 LIMIT 1) as primary_contact,
+               (SELECT SUM(cl.credit_amount) FROM credit_lines cl WHERE cl.company_id=c.id AND cl.status!='已结清') as total_credit
+               FROM companies c WHERE c.business_stage=? ORDER BY c.level, c.updated_at DESC""",
+            (stage,)
+        ).fetchall()
+        result[stage] = [dict(r) for r in rows]
+    conn.close()
+    return {"stages": PIPELINE_STAGES, "data": result}
+
+@app.patch("/api/companies/{company_id}/stage")
+def update_company_stage(company_id: int, body: dict):
+    stage = body.get("stage", "")
+    if stage not in PIPELINE_STAGES:
+        raise HTTPException(400, "无效的业务阶段")
+    conn = get_db()
+    conn.execute("UPDATE companies SET business_stage=?, updated_at=datetime('now','localtime') WHERE id=?",
+                 (stage, company_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ── 授信台账 ──────────────────────────────────────────────────────────────────
+
+class CreditLineBody(BaseModel):
+    product_name: str
+    credit_type: str = ""
+    credit_amount: float = 0
+    used_amount: float = 0
+    interest_rate: str = ""
+    guarantee_type: str = ""
+    start_date: str = ""
+    end_date: str = ""
+    status: str = "正常"
+    notes: str = ""
+
+@app.get("/api/companies/{company_id}/credit-lines")
+def list_credit_lines(company_id: int):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM credit_lines WHERE company_id=? ORDER BY end_date, created_at DESC",
+        (company_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+@app.post("/api/companies/{company_id}/credit-lines")
+def create_credit_line(company_id: int, body: CreditLineBody):
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO credit_lines (company_id, product_name, credit_type, credit_amount, used_amount,
+             interest_rate, guarantee_type, start_date, end_date, status, notes)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (company_id, body.product_name, body.credit_type, body.credit_amount, body.used_amount,
+         body.interest_rate, body.guarantee_type, body.start_date, body.end_date, body.status, body.notes)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM credit_lines WHERE id=?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+@app.put("/api/credit-lines/{line_id}")
+def update_credit_line(line_id: int, body: CreditLineBody):
+    conn = get_db()
+    conn.execute(
+        """UPDATE credit_lines SET product_name=?, credit_type=?, credit_amount=?, used_amount=?,
+             interest_rate=?, guarantee_type=?, start_date=?, end_date=?, status=?, notes=?
+           WHERE id=?""",
+        (body.product_name, body.credit_type, body.credit_amount, body.used_amount,
+         body.interest_rate, body.guarantee_type, body.start_date, body.end_date, body.status, body.notes,
+         line_id)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM credit_lines WHERE id=?", (line_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+@app.delete("/api/credit-lines/{line_id}")
+def delete_credit_line(line_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM credit_lines WHERE id=?", (line_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+@app.get("/api/credit-lines/expiring")
+def expiring_credit_lines(days: int = 30):
+    from datetime import date, timedelta
+    today = date.today().isoformat()
+    deadline = (date.today() + timedelta(days=days)).isoformat()
+    conn = get_db()
+    rows = conn.execute(
+        """SELECT cl.*, c.name as company_name FROM credit_lines cl
+           JOIN companies c ON cl.company_id=c.id
+           WHERE cl.end_date != '' AND cl.end_date BETWEEN ? AND ? AND cl.status != '已结清'
+           ORDER BY cl.end_date""",
+        (today, deadline)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── 贷后检查 ──────────────────────────────────────────────────────────────────
+
+class PostLoanCheckBody(BaseModel):
+    check_date: str
+    check_type: str = "日常检查"
+    risk_level: str = "正常"
+    inspector: str = ""
+    content: str = ""
+    issues: str = ""
+    measures: str = ""
+    next_check_date: str = ""
+
+@app.get("/api/companies/{company_id}/post-loan-checks")
+def list_post_loan_checks(company_id: int):
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM post_loan_checks WHERE company_id=? ORDER BY check_date DESC",
+        (company_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+@app.post("/api/companies/{company_id}/post-loan-checks")
+def create_post_loan_check(company_id: int, body: PostLoanCheckBody):
+    conn = get_db()
+    cur = conn.execute(
+        """INSERT INTO post_loan_checks (company_id, check_date, check_type, risk_level,
+             inspector, content, issues, measures, next_check_date)
+           VALUES (?,?,?,?,?,?,?,?,?)""",
+        (company_id, body.check_date, body.check_type, body.risk_level,
+         body.inspector, body.content, body.issues, body.measures, body.next_check_date)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM post_loan_checks WHERE id=?", (cur.lastrowid,)).fetchone()
+    conn.close()
+    return dict(row)
+
+@app.put("/api/post-loan-checks/{check_id}")
+def update_post_loan_check(check_id: int, body: PostLoanCheckBody):
+    conn = get_db()
+    conn.execute(
+        """UPDATE post_loan_checks SET check_date=?, check_type=?, risk_level=?,
+             inspector=?, content=?, issues=?, measures=?, next_check_date=?
+           WHERE id=?""",
+        (body.check_date, body.check_type, body.risk_level,
+         body.inspector, body.content, body.issues, body.measures, body.next_check_date,
+         check_id)
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM post_loan_checks WHERE id=?", (check_id,)).fetchone()
+    conn.close()
+    return dict(row)
+
+@app.delete("/api/post-loan-checks/{check_id}")
+def delete_post_loan_check(check_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM post_loan_checks WHERE id=?", (check_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.delete("/api/companies/{company_id}")
@@ -1076,23 +1257,67 @@ def ai_extract_fields(body: ExtractBody):
 @app.get("/api/ai/daily-brief")
 def daily_brief():
     today = date.today().isoformat()
+    from datetime import timedelta
+    deadline_30 = (date.today() + timedelta(days=30)).isoformat()
     conn = get_db()
+
     todos = conn.execute(
         """SELECT t.*, co.name as company_name
            FROM todos t LEFT JOIN companies co ON t.company_id=co.id
            WHERE t.date <= ? AND t.done=0 ORDER BY t.priority DESC""",
         (today,),
     ).fetchall()
+
+    expiring_credits = conn.execute(
+        """SELECT cl.*, c.name as company_name FROM credit_lines cl
+           JOIN companies c ON cl.company_id=c.id
+           WHERE cl.end_date != '' AND cl.end_date BETWEEN ? AND ? AND cl.status != '已结清'
+           ORDER BY cl.end_date LIMIT 10""",
+        (today, deadline_30)
+    ).fetchall()
+
+    overdue_checks = conn.execute(
+        """SELECT c.name as company_name, c.id as company_id,
+               MAX(plc.check_date) as last_check,
+               MIN(plc.next_check_date) as next_due
+           FROM companies c
+           JOIN post_loan_checks plc ON plc.company_id=c.id
+           WHERE c.business_stage IN ('用信中','贷后管理')
+             AND plc.next_check_date != '' AND plc.next_check_date <= ?
+           GROUP BY c.id ORDER BY next_due LIMIT 10""",
+        (today,)
+    ).fetchall()
+
     conn.close()
 
-    if not todos:
-        return {"reply": "今日没有待办事项，可以主动拓展新客户或跟进潜在业务。", "mode": "fast"}
+    parts = []
+    if todos:
+        todo_text = "\n".join(
+            f"- {'[' + r['company_name'] + '] ' if r['company_name'] else ''}[{r['date']}] {r['content']}"
+            for r in todos
+        )
+        parts.append(f"【待办事项（{len(todos)}条）】\n{todo_text}")
 
-    todo_text = "\n".join(
-        f"- {'[' + r['company_name'] + '] ' if r['company_name'] else ''}[{r['date']}] {r['content']}"
-        for r in todos
-    )
-    prompt = f"今日是{today}，以下是今日及逾期未完成的待办事项：\n\n{todo_text}\n\n请帮我梳理优先级并给出今日工作建议，简洁实用。"
+    if expiring_credits:
+        cl_text = "\n".join(
+            f"- [{r['company_name']}] {r['product_name']} 到期{r['end_date']}，授信{r['credit_amount']}万元"
+            for r in expiring_credits
+        )
+        parts.append(f"【30天内到期授信（{len(expiring_credits)}条）】\n{cl_text}")
+
+    if overdue_checks:
+        chk_text = "\n".join(
+            f"- [{r['company_name']}] 贷后检查应于{r['next_due']}完成"
+            for r in overdue_checks
+        )
+        parts.append(f"【逾期贷后检查（{len(overdue_checks)}家）】\n{chk_text}")
+
+    if not parts:
+        return {"reply": "今日没有待办事项，授信和贷后检查均无逾期，可以主动拓展新客户。", "mode": "fast"}
+
+    prompt = (f"今日是{today}，我是银行对公客户经理，以下是今日工作摘要：\n\n"
+              + "\n\n".join(parts)
+              + "\n\n请帮我梳理今日工作优先级，分类给出行动建议，要简洁实用，突出最紧急的事项。")
 
     try:
         reply = chat([{"role": "user", "content": prompt}], mode="fast")

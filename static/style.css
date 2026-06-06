@@ -428,3 +428,117 @@ body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; 
   }
   #login-page > * { width: 100%; max-width: 360px; }
 }
+
+/* ── Stage filter bar ─────────────────────────────────────────────────────── */
+.stage-filter-bar {
+  display: flex;
+  gap: 6px;
+  padding: 8px 16px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+  flex-shrink: 0;
+}
+.stage-filter-bar::-webkit-scrollbar { display: none; }
+.stage-filter-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stage-filter-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* ── Stage badges ────────────────────────────────────────────────────────── */
+.stage-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  vertical-align: middle;
+}
+.stage-prospect  { background: #e8f5e9; color: #388e3c; }
+.stage-applying  { background: #fff3e0; color: #e65100; }
+.stage-approved  { background: #e3f2fd; color: #1565c0; }
+.stage-active    { background: #f3e5f5; color: #6a1b9a; }
+.stage-postloan  { background: #fce4ec; color: #ad1457; }
+.stage-closed    { background: #f5f5f5; color: #757575; }
+
+/* ── Risk / status badges ────────────────────────────────────────────────── */
+.risk-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.risk-normal      { background: #e8f5e9; color: #388e3c; }
+.risk-watch       { background: #fff8e1; color: #f9a825; }
+.risk-substandard { background: #fff3e0; color: #e65100; }
+.risk-doubtful    { background: #fce4ec; color: #c62828; }
+.risk-loss        { background: #ffebee; color: #b71c1c; }
+.risk-closed      { background: #f5f5f5; color: #9e9e9e; }
+
+/* ── Credit line items ───────────────────────────────────────────────────── */
+.credit-stat-card {
+  background: #f0f4ff;
+  border-radius: 10px;
+  padding: 12px 8px;
+  text-align: center;
+}
+.credit-stat-val { font-size: 16px; font-weight: 700; color: var(--primary); }
+.credit-stat-lbl { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+.credit-line-item {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.credit-line-item.cl-overdue  { border-color: #f44336; background: #fff5f5; }
+.credit-line-item.cl-expiring { border-color: #ff9800; background: #fffde7; }
+.cl-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.cl-name   { font-size: 14px; font-weight: 600; color: var(--text); }
+.cl-meta   { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; }
+.cl-amounts {
+  display: flex;
+  gap: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.cl-amounts strong { color: var(--text); }
+.cl-dates  { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.cl-notes  { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; font-style: italic; }
+.cl-actions { display: flex; gap: 8px; margin-top: 8px; }
+.text-danger  { color: #f44336 !important; }
+.text-warning { color: #ff9800 !important; }
+
+/* ── Post-loan check items ───────────────────────────────────────────────── */
+.postloan-item {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+.pl-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.pl-date   { font-size: 13px; font-weight: 600; color: var(--text); }
+.pl-type   { font-size: 12px; background: #f0f4ff; color: var(--primary); padding: 2px 8px; border-radius: 10px; }
+.pl-inspector { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; }
+.pl-content { font-size: 13px; color: var(--text); margin-bottom: 6px; white-space: pre-wrap; }
+.pl-field  { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.pl-field-lbl { font-weight: 600; color: var(--text); }
+.pl-next   { font-size: 12px; color: var(--text-muted); margin-bottom: 8px; margin-top: 4px; }

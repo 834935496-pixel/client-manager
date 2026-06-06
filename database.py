@@ -139,6 +139,8 @@ def init_db():
     _migrate_if_needed(conn)
     _add_company_ext_fields(conn)
     _add_doc_index_fields(conn)
+    _init_credit_lines(conn)
+    _init_post_loan_checks(conn)
     conn.close()
 
 
@@ -158,6 +160,15 @@ def _add_company_ext_fields(conn):
         ("operating_scope",       "TEXT DEFAULT ''"),
     ]
     for col, defn in new_cols:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE companies ADD COLUMN {col} {defn}")
+
+    # 业务阶段 + 最近拜访日期
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(companies)").fetchall()}
+    for col, defn in [
+        ("business_stage", "TEXT DEFAULT '意向客户'"),
+        ("last_visit_date", "TEXT DEFAULT ''"),
+    ]:
         if col not in existing:
             conn.execute(f"ALTER TABLE companies ADD COLUMN {col} {defn}")
 
@@ -204,6 +215,52 @@ def _add_company_ext_fields(conn):
     for col, defn in fin_new:
         if col not in fin_cols:
             conn.execute(f"ALTER TABLE company_financials ADD COLUMN {col} {defn}")
+    conn.commit()
+
+
+def _init_credit_lines(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS credit_lines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            product_name TEXT NOT NULL,
+            credit_type TEXT DEFAULT '',
+            credit_amount REAL DEFAULT 0,
+            used_amount REAL DEFAULT 0,
+            interest_rate TEXT DEFAULT '',
+            guarantee_type TEXT DEFAULT '',
+            start_date TEXT DEFAULT '',
+            end_date TEXT DEFAULT '',
+            status TEXT DEFAULT '正常',
+            notes TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_lines_company ON credit_lines(company_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_credit_lines_end ON credit_lines(end_date)")
+    conn.commit()
+
+
+def _init_post_loan_checks(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS post_loan_checks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            company_id INTEGER NOT NULL,
+            check_date TEXT NOT NULL,
+            check_type TEXT DEFAULT '日常检查',
+            risk_level TEXT DEFAULT '正常',
+            inspector TEXT DEFAULT '',
+            content TEXT DEFAULT '',
+            issues TEXT DEFAULT '',
+            measures TEXT DEFAULT '',
+            next_check_date TEXT DEFAULT '',
+            created_at TEXT DEFAULT (datetime('now', 'localtime')),
+            FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_post_loan_company ON post_loan_checks(company_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_post_loan_date ON post_loan_checks(check_date)")
     conn.commit()
 
 

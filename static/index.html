@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#1a3a6b">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-title" content="客户档案">
-<link rel="stylesheet" href="style.css?v=16">
+<link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
 <div id="app">
@@ -60,6 +60,15 @@
     <div class="search-box">
       <input type="search" class="search-input" id="company-search" placeholder="搜索企业名称..." oninput="searchCompanies(this.value)">
     </div>
+    <div id="stage-filter-bar" class="stage-filter-bar">
+      <button class="stage-filter-btn active" data-stage="" onclick="filterByStage(this,'')">全部</button>
+      <button class="stage-filter-btn" data-stage="意向客户" onclick="filterByStage(this,'意向客户')">意向</button>
+      <button class="stage-filter-btn" data-stage="授信申请中" onclick="filterByStage(this,'授信申请中')">申请中</button>
+      <button class="stage-filter-btn" data-stage="已授信" onclick="filterByStage(this,'已授信')">已授信</button>
+      <button class="stage-filter-btn" data-stage="用信中" onclick="filterByStage(this,'用信中')">用信中</button>
+      <button class="stage-filter-btn" data-stage="贷后管理" onclick="filterByStage(this,'贷后管理')">贷后</button>
+      <button class="stage-filter-btn" data-stage="已结清" onclick="filterByStage(this,'已结清')">已结清</button>
+    </div>
     <input type="file" id="pdf-file-input" accept=".pdf" style="display:none" onchange="handlePdfUpload(this)">
     <div id="companies-list" style="flex:1;overflow-y:auto;"></div>
   </div>
@@ -71,7 +80,9 @@
         <button class="icon-btn" onclick="navTo('companies')">←</button>
         <div>
           <h1 id="detail-name">企业详情</h1>
-          <div class="subtitle" id="detail-industry"></div>
+          <div class="subtitle" id="detail-industry">
+            <span id="detail-stage-badge" style="display:none;"></span>
+          </div>
         </div>
       </div>
       <div class="header-actions">
@@ -80,14 +91,16 @@
       </div>
     </div>
 
-    <div class="tabs">
+    <div class="tabs" style="overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;">
       <button class="tab active" onclick="switchTab('info')">基本信息</button>
-      <button class="tab" onclick="switchTab('equity')">股权图谱</button>
-      <button class="tab" onclick="switchTab('products')">合作产品</button>
+      <button class="tab" onclick="switchTab('credit')">授信台账</button>
+      <button class="tab" onclick="switchTab('postloan')">贷后检查</button>
       <button class="tab" onclick="switchTab('interactions')">合作动态</button>
       <button class="tab" onclick="switchTab('todos')">待办</button>
       <button class="tab" onclick="switchTab('docs')">文档</button>
       <button class="tab" onclick="switchTab('finance')">财务状况</button>
+      <button class="tab" onclick="switchTab('products')">合作产品</button>
+      <button class="tab" onclick="switchTab('equity')">股权图谱</button>
     </div>
 
     <!-- 基本信息（含联系人） -->
@@ -98,6 +111,19 @@
         <button class="btn btn-outline btn-sm" onclick="showAddContact()">＋ 添加</button>
       </div>
       <div id="contacts-list"></div>
+    </div>
+
+    <!-- 授信台账 -->
+    <div id="tab-credit" style="display:none;">
+      <div id="credit-summary" style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px;"></div>
+      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="showCreditLineModal()">＋ 新增授信</button>
+      <div id="credit-lines-list"></div>
+    </div>
+
+    <!-- 贷后检查 -->
+    <div id="tab-postloan" style="display:none;">
+      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="showPostLoanModal()">＋ 新增检查记录</button>
+      <div id="post-loan-list"></div>
     </div>
 
     <!-- 合作产品 -->
@@ -276,6 +302,23 @@
             <option value="B" selected>B 级（维护）</option>
             <option value="C">C 级（普通）</option>
           </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">业务阶段</label>
+          <select class="form-select" id="fc-stage">
+            <option value="意向客户">意向客户</option>
+            <option value="授信申请中">授信申请中</option>
+            <option value="已授信">已授信</option>
+            <option value="用信中">用信中</option>
+            <option value="贷后管理">贷后管理</option>
+            <option value="已结清">已结清</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">最近拜访</label>
+          <input class="form-input" id="fc-last-visit" type="date">
         </div>
       </div>
       <div class="form-group">
@@ -602,6 +645,145 @@
   </div>
 
   <!-- ── 推送提醒 Modal ── -->
+  <!-- ── 授信台账 Modal ── -->
+  <div class="modal-overlay" id="credit-line-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="credit-line-modal-title">新增授信</div>
+      <input type="hidden" id="edit-credit-line-id">
+      <div class="form-group">
+        <label class="form-label">产品名称 *</label>
+        <input class="form-input" id="cl-product-name" placeholder="如：流动资金贷款">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">授信品种</label>
+          <select class="form-select" id="cl-credit-type">
+            <option value="">请选择</option>
+            <option>流动资金贷款</option>
+            <option>固定资产贷款</option>
+            <option>承兑汇票</option>
+            <option>信用证</option>
+            <option>保函</option>
+            <option>综合授信</option>
+            <option>其他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">状态</label>
+          <select class="form-select" id="cl-status">
+            <option value="正常">正常</option>
+            <option value="关注">关注</option>
+            <option value="逾期">逾期</option>
+            <option value="已结清">已结清</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">授信金额（万元）</label>
+          <input class="form-input" id="cl-credit-amount" type="number" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">已用额度（万元）</label>
+          <input class="form-input" id="cl-used-amount" type="number" placeholder="0">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">授信起始日</label>
+          <input class="form-input" id="cl-start-date" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">授信到期日</label>
+          <input class="form-input" id="cl-end-date" type="date">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">利率</label>
+          <input class="form-input" id="cl-interest-rate" placeholder="如：4.35%">
+        </div>
+        <div class="form-group">
+          <label class="form-label">担保方式</label>
+          <select class="form-select" id="cl-guarantee-type">
+            <option value="">请选择</option>
+            <option>信用</option>
+            <option>抵押</option>
+            <option>质押</option>
+            <option>保证</option>
+            <option>抵押+保证</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">备注</label>
+        <textarea class="form-textarea" id="cl-notes" placeholder="还款计划、特别条款等..." rows="2"></textarea>
+      </div>
+      <button class="btn btn-primary" onclick="saveCreditLine()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('credit-line-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 贷后检查 Modal ── -->
+  <div class="modal-overlay" id="post-loan-modal">
+    <div class="modal" style="max-height:88vh;overflow-y:auto;">
+      <div class="modal-handle"></div>
+      <div class="modal-title" id="post-loan-modal-title">新增贷后检查记录</div>
+      <input type="hidden" id="edit-post-loan-id">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">检查日期 *</label>
+          <input class="form-input" id="plc-date" type="date">
+        </div>
+        <div class="form-group">
+          <label class="form-label">检查类型</label>
+          <select class="form-select" id="plc-type">
+            <option value="日常检查">日常检查</option>
+            <option value="专项检查">专项检查</option>
+            <option value="年度检查">年度检查</option>
+            <option value="现场检查">现场检查</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">风险等级</label>
+          <select class="form-select" id="plc-risk">
+            <option value="正常">正常</option>
+            <option value="关注">关注</option>
+            <option value="次级">次级</option>
+            <option value="可疑">可疑</option>
+            <option value="损失">损失</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">检查人</label>
+          <input class="form-input" id="plc-inspector" placeholder="姓名">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">检查情况</label>
+        <textarea class="form-textarea" id="plc-content" placeholder="企业经营、财务、担保等情况描述..." rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">发现问题</label>
+        <textarea class="form-textarea" id="plc-issues" placeholder="发现的风险隐患..." rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">整改措施</label>
+        <textarea class="form-textarea" id="plc-measures" placeholder="跟进措施、要求整改内容..." rows="2"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">下次检查日期</label>
+        <input class="form-input" id="plc-next-date" type="date">
+      </div>
+      <button class="btn btn-primary" onclick="savePostLoanCheck()">保存</button>
+      <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('post-loan-modal')">取消</button>
+    </div>
+  </div>
+
+  <!-- ── 推送提醒 Modal ── -->
   <div class="modal-overlay" id="push-modal">
     <div class="modal">
       <div class="modal-handle"></div>
@@ -667,7 +849,7 @@
   <button class="fab" id="fab" onclick="showQuickAdd()">＋</button>
 
 </div>
-<script src="app.js?v=47"></script>
+<script src="app.js?v=48"></script>
 <script>
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch(() => {});

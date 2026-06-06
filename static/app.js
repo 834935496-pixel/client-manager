@@ -62,7 +62,7 @@ function apiFetch(path, opts = {}) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-const CLIENT_VERSION = "61";
+const CLIENT_VERSION = "62";
 
 async function checkVersion() {
   try {
@@ -106,6 +106,24 @@ function navTo(page) {
   if (page === "ai") loadAiCompanySelector();
 }
 
+// ── Stage filter ──────────────────────────────────────────────────────────────
+let _currentStageFilter = "";
+let _allCompanies = [];
+
+function filterByStage(btn, stage) {
+  _currentStageFilter = stage;
+  document.querySelectorAll(".stage-filter-btn").forEach((b) => b.classList.remove("active"));
+  btn.classList.add("active");
+  const filtered = stage ? _allCompanies.filter((c) => c.business_stage === stage) : _allCompanies;
+  renderCompaniesList(filtered);
+}
+
+function _stageCls(stage) {
+  const map = { "意向客户": "prospect", "授信申请中": "applying", "已授信": "approved",
+                "用信中": "active", "贷后管理": "postloan", "已结清": "closed" };
+  return map[stage] || "prospect";
+}
+
 function showPage(page) {
   document.querySelectorAll(".page").forEach((p) => p.classList.remove("active"));
   document.getElementById(`page-${page}`).classList.add("active");
@@ -146,7 +164,21 @@ let searchTimer = null;
 async function loadCompanies(q = "") {
   const res = await apiFetch(`/api/companies?q=${encodeURIComponent(q)}`);
   const companies = await res.json();
-  renderCompaniesList(companies);
+  _allCompanies = companies;
+  const filtered = _currentStageFilter ? companies.filter((c) => c.business_stage === _currentStageFilter) : companies;
+  renderCompaniesList(filtered);
+  _updateStageCounts(companies);
+}
+
+function _updateStageCounts(companies) {
+  const counts = {};
+  companies.forEach((c) => { counts[c.business_stage] = (counts[c.business_stage] || 0) + 1; });
+  document.querySelectorAll(".stage-filter-btn").forEach((btn) => {
+    const stage = btn.dataset.stage;
+    const cnt = stage ? (counts[stage] || 0) : companies.length;
+    const label = btn.textContent.replace(/ \d+$/, "");
+    btn.textContent = cnt > 0 ? `${label} ${cnt}` : label;
+  });
 }
 
 function searchCompanies(q) {
@@ -171,8 +203,9 @@ function renderCompaniesList(companies) {
           ${c.industry ? ' · ' + escHtml(c.industry) : ''}
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;">
+      <div style="display:flex;align-items:center;gap:6px;">
         <span class="level-badge level-${c.level}">${c.level}</span>
+        ${c.business_stage && c.business_stage !== '意向客户' ? `<span class="stage-badge stage-${_stageCls(c.business_stage)}">${c.business_stage}</span>` : ''}
         <span class="list-menu-btn" data-id="${c.id}" style="font-size:20px;padding:4px 6px;color:var(--text-muted);">⋮</span>
       </div>
     </div>`).join("");
@@ -238,7 +271,11 @@ async function openCompany(id) {
   const res = await apiFetch(`/api/companies/${id}`);
   const company = await res.json();
   document.getElementById("detail-name").textContent = company.name;
-  document.getElementById("detail-industry").textContent = company.industry || "";
+  const industryEl = document.getElementById("detail-industry");
+  industryEl.innerHTML = (company.industry ? escHtml(company.industry) : "")
+    + (company.business_stage
+      ? ` <span class="stage-badge stage-${_stageCls(company.business_stage)}">${escHtml(company.business_stage)}</span>`
+      : "");
   renderCompanyInfo(company);
   switchTab("info");
   showPage("detail");
@@ -301,6 +338,8 @@ async function switchTab(tab) {
   currentTab = tab;
   if (tab === "info") loadContacts();
   if (tab === "products") renderProducts();
+  if (tab === "credit") loadCreditLines();
+  if (tab === "postloan") loadPostLoanChecks();
   if (tab === "interactions") loadInteractions();
   if (tab === "todos") loadCompanyTodos();
   if (tab === "docs") loadDocuments();
@@ -798,6 +837,8 @@ function editCurrentCompany() {
     document.getElementById("fc-company-scale").value = c.company_scale || "";
     document.getElementById("fc-office-address").value = c.office_address || "";
     document.getElementById("fc-employee-count").value = c.employee_count || "";
+    document.getElementById("fc-stage").value = c.business_stage || "意向客户";
+    document.getElementById("fc-last-visit").value = c.last_visit_date || "";
     showModal("add-company-modal");
   });
 }
@@ -823,6 +864,8 @@ async function saveCompany() {
     office_address: document.getElementById("fc-office-address").value.trim(),
     employee_count: document.getElementById("fc-employee-count").value.trim(),
     operating_scope: document.getElementById("fc-operating-scope").value.trim(),
+    business_stage: document.getElementById("fc-stage").value,
+    last_visit_date: document.getElementById("fc-last-visit").value,
   };
   if (!body.name) { alert("企业名称不能为空"); return; }
   if (editId) {
@@ -848,6 +891,8 @@ function clearCompanyForm() {
   ].forEach((id) => document.getElementById(id).value = "");
   document.getElementById("fc-company-scale").value = "";
   document.getElementById("fc-level").value = "B";
+  document.getElementById("fc-stage").value = "意向客户";
+  document.getElementById("fc-last-visit").value = "";
   document.getElementById("company-modal-title").textContent = "新建企业";
   document.getElementById("edit-company-id").value = "";
 }
@@ -2566,6 +2611,223 @@ async function _saveEquityNode() {
   const inner = document.getElementById('equity-inner');
   if (inner && _equityData) _renderEquityChart(inner, _equityData);
 }
+
+// ── 授信台账 ──────────────────────────────────────────────────────────────────
+
+let _editCreditLineId = null;
+
+async function loadCreditLines() {
+  const res = await apiFetch(`/api/companies/${currentCompanyId}/credit-lines`);
+  const lines = await res.json();
+  renderCreditLines(lines);
+}
+
+function renderCreditLines(lines) {
+  const el = document.getElementById("credit-lines-list");
+  const summary = document.getElementById("credit-summary");
+
+  const active = lines.filter((l) => l.status !== "已结清");
+  const totalCredit = active.reduce((s, l) => s + (l.credit_amount || 0), 0);
+  const totalUsed = active.reduce((s, l) => s + (l.used_amount || 0), 0);
+  const available = totalCredit - totalUsed;
+  summary.innerHTML = [
+    ["授信总额", totalCredit.toFixed(0) + "万"],
+    ["已用额度", totalUsed.toFixed(0) + "万"],
+    ["可用额度", available.toFixed(0) + "万"],
+  ].map(([l, v]) => `<div class="credit-stat-card"><div class="credit-stat-val">${v}</div><div class="credit-stat-lbl">${l}</div></div>`).join("");
+
+  if (!lines.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">💳</div><p>暂无授信记录</p></div>';
+    return;
+  }
+  const today = todayISO();
+  el.innerHTML = lines.map((l) => {
+    const expiring = l.end_date && l.end_date <= addDays(today, 30) && l.status !== "已结清";
+    const overdue = l.end_date && l.end_date < today && l.status !== "已结清";
+    return `<div class="credit-line-item${overdue ? " cl-overdue" : expiring ? " cl-expiring" : ""}">
+      <div class="cl-header">
+        <span class="cl-name">${escHtml(l.product_name)}</span>
+        <span class="risk-badge risk-${_riskCls(l.status)}">${escHtml(l.status)}</span>
+      </div>
+      <div class="cl-meta">
+        ${l.credit_type ? escHtml(l.credit_type) + " · " : ""}
+        ${l.guarantee_type ? escHtml(l.guarantee_type) + " · " : ""}
+        ${l.interest_rate ? "利率 " + escHtml(l.interest_rate) : ""}
+      </div>
+      <div class="cl-amounts">
+        <span>授信 <strong>${l.credit_amount || 0}万</strong></span>
+        <span>已用 <strong>${l.used_amount || 0}万</strong></span>
+        <span>可用 <strong>${(l.credit_amount - l.used_amount).toFixed(0)}万</strong></span>
+      </div>
+      ${l.end_date ? `<div class="cl-dates${overdue ? " text-danger" : expiring ? " text-warning" : ""}">
+        ${l.start_date ? l.start_date + " → " : ""}到期 ${l.end_date}${overdue ? " ⚠️逾期" : expiring ? " ⚠️即将到期" : ""}
+      </div>` : ""}
+      ${l.notes ? `<div class="cl-notes">${escHtml(l.notes)}</div>` : ""}
+      <div class="cl-actions">
+        <button class="btn btn-outline btn-sm" onclick="editCreditLine(${l.id})">编辑</button>
+        <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="deleteCreditLine(${l.id})">删除</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function addDays(dateStr, days) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function _riskCls(status) {
+  const m = { "正常": "normal", "关注": "watch", "次级": "substandard", "可疑": "doubtful", "损失": "loss",
+               "逾期": "doubtful", "已结清": "closed" };
+  return m[status] || "normal";
+}
+
+function showCreditLineModal(line = null) {
+  _editCreditLineId = line ? line.id : null;
+  document.getElementById("credit-line-modal-title").textContent = line ? "编辑授信" : "新增授信";
+  document.getElementById("edit-credit-line-id").value = line ? line.id : "";
+  document.getElementById("cl-product-name").value = line ? line.product_name : "";
+  document.getElementById("cl-credit-type").value = line ? line.credit_type : "";
+  document.getElementById("cl-status").value = line ? line.status : "正常";
+  document.getElementById("cl-credit-amount").value = line ? line.credit_amount : "";
+  document.getElementById("cl-used-amount").value = line ? line.used_amount : "";
+  document.getElementById("cl-start-date").value = line ? line.start_date : "";
+  document.getElementById("cl-end-date").value = line ? line.end_date : "";
+  document.getElementById("cl-interest-rate").value = line ? line.interest_rate : "";
+  document.getElementById("cl-guarantee-type").value = line ? line.guarantee_type : "";
+  document.getElementById("cl-notes").value = line ? line.notes : "";
+  showModal("credit-line-modal");
+}
+
+async function editCreditLine(id) {
+  const res = await apiFetch(`/api/companies/${currentCompanyId}/credit-lines`);
+  const lines = await res.json();
+  const line = lines.find((l) => l.id === id);
+  if (line) showCreditLineModal(line);
+}
+
+async function saveCreditLine() {
+  const editId = document.getElementById("edit-credit-line-id").value;
+  const body = {
+    product_name: document.getElementById("cl-product-name").value.trim(),
+    credit_type: document.getElementById("cl-credit-type").value,
+    status: document.getElementById("cl-status").value,
+    credit_amount: parseFloat(document.getElementById("cl-credit-amount").value) || 0,
+    used_amount: parseFloat(document.getElementById("cl-used-amount").value) || 0,
+    start_date: document.getElementById("cl-start-date").value,
+    end_date: document.getElementById("cl-end-date").value,
+    interest_rate: document.getElementById("cl-interest-rate").value.trim(),
+    guarantee_type: document.getElementById("cl-guarantee-type").value,
+    notes: document.getElementById("cl-notes").value.trim(),
+  };
+  if (!body.product_name) { alert("产品名称不能为空"); return; }
+  if (editId) {
+    await apiFetch(`/api/credit-lines/${editId}`, { method: "PUT", body: JSON.stringify(body) });
+  } else {
+    await apiFetch(`/api/companies/${currentCompanyId}/credit-lines`, { method: "POST", body: JSON.stringify(body) });
+  }
+  hideModal("credit-line-modal");
+  loadCreditLines();
+}
+
+async function deleteCreditLine(id) {
+  showConfirm("删除此授信记录？", async () => {
+    await apiFetch(`/api/credit-lines/${id}`, { method: "DELETE" });
+    loadCreditLines();
+  });
+}
+
+
+// ── 贷后检查 ──────────────────────────────────────────────────────────────────
+
+let _editPostLoanId = null;
+
+async function loadPostLoanChecks() {
+  const res = await apiFetch(`/api/companies/${currentCompanyId}/post-loan-checks`);
+  const checks = await res.json();
+  renderPostLoanChecks(checks);
+}
+
+function renderPostLoanChecks(checks) {
+  const el = document.getElementById("post-loan-list");
+  if (!checks.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><p>暂无贷后检查记录</p></div>';
+    return;
+  }
+  const today = todayISO();
+  el.innerHTML = checks.map((c) => {
+    const isOverdue = c.next_check_date && c.next_check_date < today;
+    return `<div class="postloan-item">
+      <div class="pl-header">
+        <span class="pl-date">${c.check_date}</span>
+        <span class="pl-type">${escHtml(c.check_type)}</span>
+        <span class="risk-badge risk-${_riskCls(c.risk_level)}">${escHtml(c.risk_level)}</span>
+      </div>
+      ${c.inspector ? `<div class="pl-inspector">检查人：${escHtml(c.inspector)}</div>` : ""}
+      ${c.content ? `<div class="pl-content">${escHtml(c.content)}</div>` : ""}
+      ${c.issues ? `<div class="pl-field"><span class="pl-field-lbl">发现问题：</span>${escHtml(c.issues)}</div>` : ""}
+      ${c.measures ? `<div class="pl-field"><span class="pl-field-lbl">整改措施：</span>${escHtml(c.measures)}</div>` : ""}
+      ${c.next_check_date ? `<div class="pl-next${isOverdue ? " text-danger" : ""}">下次检查：${c.next_check_date}${isOverdue ? " ⚠️已逾期" : ""}</div>` : ""}
+      <div class="cl-actions">
+        <button class="btn btn-outline btn-sm" onclick="editPostLoanCheck(${c.id})">编辑</button>
+        <button class="btn btn-outline btn-sm" style="color:var(--danger);border-color:var(--danger);" onclick="deletePostLoanCheck(${c.id})">删除</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function showPostLoanModal(check = null) {
+  _editPostLoanId = check ? check.id : null;
+  document.getElementById("post-loan-modal-title").textContent = check ? "编辑检查记录" : "新增贷后检查记录";
+  document.getElementById("edit-post-loan-id").value = check ? check.id : "";
+  document.getElementById("plc-date").value = check ? check.check_date : todayISO();
+  document.getElementById("plc-type").value = check ? check.check_type : "日常检查";
+  document.getElementById("plc-risk").value = check ? check.risk_level : "正常";
+  document.getElementById("plc-inspector").value = check ? check.inspector : "";
+  document.getElementById("plc-content").value = check ? check.content : "";
+  document.getElementById("plc-issues").value = check ? check.issues : "";
+  document.getElementById("plc-measures").value = check ? check.measures : "";
+  document.getElementById("plc-next-date").value = check ? check.next_check_date : "";
+  showModal("post-loan-modal");
+}
+
+async function editPostLoanCheck(id) {
+  const res = await apiFetch(`/api/companies/${currentCompanyId}/post-loan-checks`);
+  const checks = await res.json();
+  const check = checks.find((c) => c.id === id);
+  if (check) showPostLoanModal(check);
+}
+
+async function savePostLoanCheck() {
+  const editId = document.getElementById("edit-post-loan-id").value;
+  const body = {
+    check_date: document.getElementById("plc-date").value,
+    check_type: document.getElementById("plc-type").value,
+    risk_level: document.getElementById("plc-risk").value,
+    inspector: document.getElementById("plc-inspector").value.trim(),
+    content: document.getElementById("plc-content").value.trim(),
+    issues: document.getElementById("plc-issues").value.trim(),
+    measures: document.getElementById("plc-measures").value.trim(),
+    next_check_date: document.getElementById("plc-next-date").value,
+  };
+  if (!body.check_date) { alert("请填写检查日期"); return; }
+  if (editId) {
+    await apiFetch(`/api/post-loan-checks/${editId}`, { method: "PUT", body: JSON.stringify(body) });
+  } else {
+    await apiFetch(`/api/companies/${currentCompanyId}/post-loan-checks`, { method: "POST", body: JSON.stringify(body) });
+  }
+  hideModal("post-loan-modal");
+  loadPostLoanChecks();
+}
+
+async function deletePostLoanCheck(id) {
+  showConfirm("删除此贷后检查记录？", async () => {
+    await apiFetch(`/api/post-loan-checks/${id}`, { method: "DELETE" });
+    loadPostLoanChecks();
+  });
+}
+
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
