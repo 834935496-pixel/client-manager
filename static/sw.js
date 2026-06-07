@@ -1,4 +1,4 @@
-const CACHE = "client-manager-v62";
+const CACHE = "client-manager-v63";
 const STATIC = ["/", "/style.css?v=20", "/app.js?v=54", "/manifest.json", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {

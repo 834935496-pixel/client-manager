@@ -162,6 +162,8 @@
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
         <div style="flex:1;font-size:11px;color:#64748b;">上传企查查/天眼查截图，AI自动识别</div>
         <input type="file" id="equity-img-input" accept="image/*" style="display:none" onchange="uploadEquityImage(this)">
+        <input type="file" id="equity-cam-input" accept="image/*" capture="environment" style="display:none" onchange="uploadEquityImage(this)">
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('equity-cam-input').click()">📸 拍照</button>
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('equity-img-input').click()" id="equity-upload-btn">📷 上传截图</button>
       </div>
       <div id="equity-chart" style="width:100%;border-radius:12px;background:#f8fafc;"></div>
@@ -1000,7 +1002,11 @@
       <div id="todo-docs-subtitle" style="font-size:13px;color:var(--text-muted);margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
       <input type="hidden" id="todo-docs-todo-id">
       <input type="file" id="todo-doc-file-input" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.md,.jpg,.jpeg,.png" style="display:none" onchange="handleTodoDocUpload(this)">
-      <button class="btn btn-primary btn-sm" style="width:100%;margin-bottom:12px;" onclick="document.getElementById('todo-doc-file-input').click()">＋ 上传附件</button>
+      <input type="file" id="todo-doc-cam-input" accept="image/*" capture="environment" style="display:none" onchange="handleTodoDocUpload(this)">
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn btn-outline btn-sm" style="flex:1;" onclick="document.getElementById('todo-doc-cam-input').click()">📸 拍照</button>
+        <button class="btn btn-primary btn-sm" style="flex:1;" onclick="document.getElementById('todo-doc-file-input').click()">＋ 上传附件</button>
+      </div>
       <div id="todo-docs-list"></div>
       <button class="btn btn-outline" style="width:100%;margin-top:8px;" onclick="hideModal('todo-docs-modal')">关闭</button>
     </div>
